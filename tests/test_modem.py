@@ -10,7 +10,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
-from boxcar import Config, apply_channel, modulate, receive
+from boxcar import (
+    Config,
+    apply_channel,
+    frames_to_ts,
+    modulate,
+    modulate_stream,
+    receive,
+    receive_stream,
+    ts_to_frames,
+)
 
 
 def test_byte_exact_clean():
@@ -44,6 +53,20 @@ def test_binary_payload_roundtrip():
     rx = apply_channel(modulate(payload, cfg), cfg, es_n0_db=16.0, cfo_hz=-900.0,
                        frac_delay=0.2, seed=5)
     assert receive(rx, cfg) == payload
+
+
+def test_stream_multiframe():
+    # A chunked "transport stream" of many frames must reassemble byte-exact.
+    cfg = Config()
+    rng = np.random.default_rng(9)
+    ts = rng.integers(0, 256, size=188 * 60, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, packets_per_frame=7)
+    tx = modulate_stream(frames, cfg)
+    rx = apply_channel(tx, cfg, es_n0_db=18.0, cfo_hz=1500.0, frac_delay=0.4, seed=9)
+    got = receive_stream(rx, cfg)
+    assert len(got) == len(frames)
+    assert all(p is not None for p in got)
+    assert frames_to_ts(got) == ts
 
 
 if __name__ == "__main__":

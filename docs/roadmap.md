@@ -15,12 +15,14 @@ Turn the raw ~1e-3 BER at the cell edge into clean video.
 - [ ] Interleaving to spread burst errors
 - [ ] Re-run the BER sweep as a BER-vs-coded curve (expect ~4–5 dB coding gain)
 
-## M3 — Carry real video + audio
+## M3 — Carry real video + audio ✅ (done)
 Wrap an actual media stream instead of a test image.
-- [ ] `ffmpeg` encode: H.264 (baseline, low-res) + AAC → MPEG-TS
-- [ ] Map 188-byte TS packets onto BOXCAR frames (with continuity)
-- [ ] Loopback a few seconds of color video+audio; decode with `ffmpeg`/MediaCodec
-- [ ] Add pilot symbols for fast re-sync after packet loss
+- [x] `ffmpeg` encode: H.264 (baseline, low-res) + AAC → MPEG-TS
+- [x] Map 188-byte TS packets onto BOXCAR frames (`boxcar/stream.py`)
+- [x] Multi-frame receiver walks the burst-train, re-syncing per frame
+- [x] Loopback 3 s of 320×240 color video + 440 Hz tone: 157/157 frames,
+      byte-exact, reassembled `.ts` decodes in ffmpeg (`demos/video_loopback.py`)
+- [ ] Pilot symbols for fast re-sync after packet loss (deferred to M4)
 
 ## M4 — Real hardware
 Get bytes over the air, not just through a simulated channel.

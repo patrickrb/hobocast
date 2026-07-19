@@ -13,5 +13,21 @@ loopback you can run with no radio attached. See demos/loopback.py.
 
 from .modem import Config, modulate, receive, receive_symbols
 from .channel import apply_channel
+from .stream import (
+    frames_to_ts,
+    modulate_stream,
+    receive_stream,
+    ts_to_frames,
+)
 
-__all__ = ["Config", "modulate", "receive", "receive_symbols", "apply_channel"]
+__all__ = [
+    "Config",
+    "modulate",
+    "receive",
+    "receive_symbols",
+    "apply_channel",
+    "modulate_stream",
+    "receive_stream",
+    "ts_to_frames",
+    "frames_to_ts",
+]

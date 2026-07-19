@@ -104,24 +104,28 @@ def modulate(payload: bytes, cfg: Config = Config()) -> np.ndarray:
 
 # --- receive ---------------------------------------------------------------
 
-def _acquire(mf: np.ndarray, cfg: Config):
-    """Find the preamble: returns (fractional sample offset of symbol 0, phi0, omega).
+def _acquire(mf: np.ndarray, cfg: Config, start: int = 0, search: int | None = None):
+    """Find the next preamble at/after `start`.
 
-    Correlates the matched-filtered stream against the known preamble sampled at
-    symbol spacing. The magnitude peak locates the frame; a linear fit of the
-    de-modulated preamble phase seeds carrier phase (phi0) and per-symbol
-    frequency offset (omega) for the tracking loop.
+    Returns (kf, phi0, omega, ratio): fractional sample offset of preamble
+    symbol 0, seed carrier phase, seed per-symbol frequency offset, and a
+    detection ratio (peak / median correlation) used to tell a real frame from
+    noise. Correlates the matched-filtered stream against the known preamble
+    sampled at symbol spacing; a linear fit of the de-modulated preamble phase
+    seeds the tracking loop.
     """
     P, sps = cfg.preamble_len, cfg.sps
     ref = np.conj(zc_preamble(cfg))
     idx = np.arange(P) * sps
-    search = min(len(mf) - P * sps, 8192 + P * sps)
+    room = len(mf) - start - P * sps
+    search = room if search is None else min(search, room)
     if search <= 0:
         return None
     mag = np.empty(search)
     for k in range(search):
-        mag[k] = abs(np.dot(ref, mf[k + idx]))
+        mag[k] = abs(np.dot(ref, mf[start + k + idx]))
     k0 = int(np.argmax(mag))
+    ratio = mag[k0] / (np.median(mag) + 1e-12)
     # Parabolic interpolation of the peak for sub-sample timing.
     delta = 0.0
     if 1 <= k0 < search - 1:
@@ -129,13 +133,13 @@ def _acquire(mf: np.ndarray, cfg: Config):
         denom = ym1 - 2.0 * y0 + yp1
         if denom != 0.0:
             delta = 0.5 * (ym1 - yp1) / denom
-    kf = k0 + delta
+    kf = start + k0 + delta
 
     pre = _sample_symbols(mf, kf, P, sps) * np.conj(zc_preamble(cfg))
     ph = np.unwrap(np.angle(pre))
     A = np.vstack([np.ones(P), np.arange(P)]).T
     phi0, omega = np.linalg.lstsq(A, ph, rcond=None)[0]
-    return kf, phi0, omega
+    return kf, phi0, omega, ratio
 
 
 def _sample_symbols(mf: np.ndarray, kf: float, count: int, sps: int) -> np.ndarray:
@@ -145,30 +149,24 @@ def _sample_symbols(mf: np.ndarray, kf: float, count: int, sps: int) -> np.ndarr
     return xr + 1j * xi
 
 
-def receive_symbols(rx: np.ndarray, cfg: Config = Config()) -> np.ndarray:
-    """Recover carrier-corrected data QPSK symbols (preamble stripped)."""
-    taps = rrc_taps(cfg.beta, cfg.sps, cfg.span)
-    mf = np.convolve(rx, taps)
-    acq = _acquire(mf, cfg)
-    if acq is None:
-        return np.array([], dtype=complex)
-    kf, phi0, omega = acq
+def _demod_data(mf, kf, phi0, omega, n_syms, cfg):
+    """Carrier-correct `n_syms` data symbols after the preamble via a DD-PLL.
+
+    The decision-directed 2nd-order PLL is seeded from the preamble fit and
+    tracks residual CFO through the payload, so long frames don't drift.
+    """
     P, sps = cfg.preamble_len, cfg.sps
-
-    n_total = int((len(mf) - kf - 1) // sps)
-    if n_total <= P:
+    avail = int((len(mf) - kf - 1) // sps) - P
+    n_syms = min(n_syms, max(0, avail))
+    if n_syms <= 0:
         return np.array([], dtype=complex)
-    sym = _sample_symbols(mf, kf, n_total, sps)
-    data = sym[P:]
-
-    # Decision-directed 2nd-order PLL, seeded from the preamble fit. Tracks
-    # residual CFO through the whole payload so long frames don't drift.
+    data = _sample_symbols(mf, kf + P * sps, n_syms, sps)
     phi = phi0 + omega * P
     freq = omega
     alpha, beta_pll = 0.05, 0.001
-    out = np.empty(len(data), dtype=complex)
+    out = np.empty(n_syms, dtype=complex)
     inv = np.sqrt(2.0)
-    for i in range(len(data)):
+    for i in range(n_syms):
         c = data[i] * np.exp(-1j * phi)
         out[i] = c
         d = (np.sign(c.real) + 1j * np.sign(c.imag)) / inv
@@ -176,6 +174,31 @@ def receive_symbols(rx: np.ndarray, cfg: Config = Config()) -> np.ndarray:
         phi += freq + alpha * err
         freq += beta_pll * err
     return out
+
+
+def _peek_length(mf, kf, phi0, omega, cfg) -> int:
+    """Read the 4-byte length header (16 data symbols) using the preamble seed."""
+    P, sps = cfg.preamble_len, cfg.sps
+    sym = _sample_symbols(mf, kf + P * sps, 16, sps)
+    corr = sym * np.exp(-1j * (phi0 + omega * (P + np.arange(16))))
+    return int.from_bytes(_bits_to_bytes(_qpsk_to_bits(corr)), "big")
+
+
+def frame_data_symbols(payload_len: int) -> int:
+    """Number of QPSK data symbols a frame with this payload length occupies."""
+    return (8 + payload_len) * 4  # (len4 + payload + crc4) bytes * 8 bits / 2
+
+
+def receive_symbols(rx: np.ndarray, cfg: Config = Config()) -> np.ndarray:
+    """Recover carrier-corrected data QPSK symbols from a single-frame capture."""
+    taps = rrc_taps(cfg.beta, cfg.sps, cfg.span)
+    mf = np.convolve(rx, taps)
+    acq = _acquire(mf, cfg, 0, 8192 + cfg.preamble_len * cfg.sps)
+    if acq is None:
+        return np.array([], dtype=complex)
+    kf, phi0, omega, _ = acq
+    n_total = int((len(mf) - kf - 1) // cfg.sps) - cfg.preamble_len
+    return _demod_data(mf, kf, phi0, omega, n_total, cfg)
 
 
 def receive(rx: np.ndarray, cfg: Config = Config()):

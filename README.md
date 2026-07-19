@@ -35,9 +35,10 @@ channel → receive. The channel models the impairments that actually bite on a
 cheap dongle (thermal noise, tuner frequency error, unknown sample timing).
 
 ```bash
-python demos/loopback.py     # push a COLOR image through the channel, byte-exact
-python demos/ber_sweep.py    # measured BER vs coherent-QPSK theory
-python tests/test_modem.py   # regression tests
+python demos/loopback.py        # push a COLOR image through the channel, byte-exact
+python demos/video_loopback.py  # real H.264+AAC color video+audio over the channel
+python demos/ber_sweep.py       # measured BER vs coherent-QPSK theory
+python tests/test_modem.py      # regression tests
 ```
 
 The loopback recovers a color test image **bit-for-bit** through a 15 dB channel
@@ -71,6 +72,12 @@ color and sound to everyone's cheap dongle is the point, this is the way.
 
 ## Status
 
-Milestone 1 (**done**): the BOXCAR waveform — modem + simulated channel + proof
-that color image bytes survive. Next up is wrapping real MPEG-TS video/audio and
-driving actual SDR hardware. See the roadmap.
+- **M1 done** — the BOXCAR waveform: modem + simulated channel + proof color
+  image bytes survive byte-exact.
+- **M3 done** — real color video + audio: an ffmpeg H.264+AAC MPEG-TS chunked
+  into a BOXCAR frame-train, through the channel, reassembled and playable
+  (157/157 frames, byte-exact).
+
+Next: **M2** forward error correction (clean up the cell edge), then **M4** real
+SDR hardware (RTL-SDR capture in, HackRF transmit out). See the
+[roadmap](docs/roadmap.md).
