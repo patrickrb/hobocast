@@ -1,0 +1,76 @@
+# hobocast 📺🚂
+
+**Color TV — with sound — thrown into a $30 RTL-SDR off the back of a moving train.**
+
+Hobocast is the digital successor to the analog NTSC-over-RTL-SDR experiment in
+`hobocon-app`. That experiment worked, but hit a wall of physics: analog NTSC
+color lives on a subcarrier 3.58 MHz above the video carrier, which falls
+*outside* an RTL-SDR's ~2.4 MHz capture window. So the analog picture is forever
+black-and-white, and the audio (another carrier 4.5 MHz up) can't come along
+either.
+
+The fix is to stop fighting analog and **go digital**. We own the transmitter,
+so we get to design the signal. A humble QPSK link fits comfortably inside the
+dongle's window and carries an MPEG-TS of **H.264 color video + AAC audio**. On a
+digital link, color and sound stop being an RF problem and become *just bytes*.
+
+The waveform is codenamed **BOXCAR** — it's a box, it hauls cargo, and it rides
+the rails.
+
+```
+  transmitter (HackRF / GNU Radio)                 receiver (RTL-SDR, $30)
+  ────────────────────────────────                 ──────────────────────────
+  video ─┐                                          IQ ─► matched filter
+  audio ─┤► ffmpeg ► MPEG-TS ► BOXCAR modem ► RF  ►      ► preamble sync
+         │           (H.264+AAC)  (QPSK/RRC)              ► carrier PLL
+                                                          ► QPSK demod
+                                                          ► MPEG-TS ► MediaCodec
+                                                                       (color + sound)
+```
+
+## It already runs — with no radio
+
+`boxcar/` is a complete, pure-Python reference modem: transmit → simulated RF
+channel → receive. The channel models the impairments that actually bite on a
+cheap dongle (thermal noise, tuner frequency error, unknown sample timing).
+
+```bash
+python demos/loopback.py     # push a COLOR image through the channel, byte-exact
+python demos/ber_sweep.py    # measured BER vs coherent-QPSK theory
+python tests/test_modem.py   # regression tests
+```
+
+The loopback recovers a color test image **bit-for-bit** through a 15 dB channel
+with +1800 Hz carrier offset and a sub-sample timing error, and writes it to
+`out/recovered.png`. The BER sweep tracks the theoretical QPSK curve within ~1 dB
+— i.e. the receiver is genuinely coherent, not faked.
+
+## Waveform at a glance
+
+| Parameter | Value | Why |
+|---|---|---|
+| Modulation | QPSK, Gray-coded | 2 bits/symbol, robust, simple carrier recovery |
+| Sample rate | 2.4 MS/s | RTL-SDR's reliable rate; the whole channel |
+| Symbol rate | 600 ksym/s (sps=4) | fits with margin; sps=2 doubles the bitrate |
+| Pulse shape | root-raised-cosine, β=0.35 | Nyquist / zero-ISI with the matched RX filter |
+| Raw bitrate | 1.2 Mbit/s (uncoded) | enough for 320×240 color H.264 + AAC |
+| Acquisition | Zadoff-Chu preamble | frame detection + timing + carrier estimate |
+| Tracking | decision-directed 2nd-order PLL | holds phase across long frames |
+| Integrity | CRC-32 per frame | drops corrupt frames instead of showing garbage |
+
+Full spec: [`docs/protocol.md`](docs/protocol.md). Where this is going:
+[`docs/roadmap.md`](docs/roadmap.md).
+
+## The tradeoff (be honest)
+
+This buys color + audio on the **cheap $30 dongle** — the thing wider-bandwidth
+SDRs (~$99+ Airspy) would otherwise be needed for. The cost is the retro analog
+*look*: no CRT scanlines, no roll, no glorious analog decay. It's a clean digital
+picture instead. If the analog charm is the point, keep the NTSC path; if getting
+color and sound to everyone's cheap dongle is the point, this is the way.
+
+## Status
+
+Milestone 1 (**done**): the BOXCAR waveform — modem + simulated channel + proof
+that color image bytes survive. Next up is wrapping real MPEG-TS video/audio and
+driving actual SDR hardware. See the roadmap.

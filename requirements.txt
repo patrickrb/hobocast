@@ -1,0 +1,3 @@
+# Reference modem needs only numpy. ffmpeg (system binary) is optional — used by
+# demos/loopback.py to convert the recovered PPM to PNG for easy viewing.
+numpy>=1.24
