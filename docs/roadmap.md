@@ -9,11 +9,14 @@ Pure-Python modem + simulated channel proving a color image survives byte-exact.
 - [x] Data-aided receiver (ZC preamble acquire + decision-directed PLL)
 - [x] CRC-framed frames; color-image loopback; BER-vs-theory sweep; tests
 
-## M2 — Forward error correction
-Turn the raw ~1e-3 BER at the cell edge into clean video.
-- [ ] Rate-1/2 convolutional encoder + Viterbi decoder (or LDPC)
-- [ ] Interleaving to spread burst errors
-- [ ] Re-run the BER sweep as a BER-vs-coded curve (expect ~4–5 dB coding gain)
+## M2 — Forward error correction ✅ (done)
+Turn the ragged BER at the cell edge into clean video.
+- [x] Rate-1/2 convolutional encoder + hard-decision Viterbi (K=7, 171/133 octal)
+- [x] Fixed-size coded frames wired into the stream layer (`cfg.fec`)
+- [x] Demo: FEC recovers 7/7 frames at 8 dB Es/N0 where uncoded gets 0/7
+      (`demos/fec_demo.py`)
+- [ ] Interleaving to spread burst errors (deferred — matters most on real fading)
+- [ ] Soft-decision Viterbi for a further ~2 dB (deferred to hardware bring-up)
 
 ## M3 — Carry real video + audio ✅ (done)
 Wrap an actual media stream instead of a test image.

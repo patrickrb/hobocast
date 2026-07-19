@@ -55,6 +55,47 @@ def test_binary_payload_roundtrip():
     assert receive(rx, cfg) == payload
 
 
+def test_fec_codec_roundtrip():
+    from boxcar.fec import conv_encode, viterbi_decode
+
+    rng = np.random.default_rng(4)
+    bits = rng.integers(0, 2, 2000).astype(np.uint8)
+    coded = conv_encode(bits)
+    assert len(coded) == (len(bits) + 6) * 2  # rate-1/2 + tail
+    assert np.array_equal(viterbi_decode(coded), bits)  # clean roundtrip
+
+
+def test_fec_corrects_errors():
+    from boxcar.fec import conv_encode, viterbi_decode
+
+    rng = np.random.default_rng(5)
+    bits = rng.integers(0, 2, 1000).astype(np.uint8)
+    coded = conv_encode(bits).copy()
+    coded[rng.random(len(coded)) < 0.03] ^= 1  # 3% channel errors
+    assert np.array_equal(viterbi_decode(coded), bits)  # fully corrected
+
+
+def test_fec_stream_beats_uncoded():
+    # At a harsh SNR, coded frames survive where uncoded ones don't.
+    rng = np.random.default_rng(6)
+    ts = rng.integers(0, 256, 188 * 21, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, 7)
+
+    cfg_u = Config(fec=False)
+    rx_u = apply_channel(modulate_stream(frames, cfg_u), cfg_u,
+                         es_n0_db=9.0, cfo_hz=1500.0, frac_delay=0.4, seed=1)
+    got_u = [p for p in receive_stream(rx_u, cfg_u) if p is not None]
+
+    cfg_c = Config(fec=True)
+    rx_c = apply_channel(modulate_stream(frames, cfg_c), cfg_c,
+                         es_n0_db=9.0, cfo_hz=1500.0, frac_delay=0.4, seed=1)
+    got_c = receive_stream(rx_c, cfg_c)
+
+    assert all(p is not None for p in got_c)          # FEC recovers all frames
+    assert frames_to_ts(got_c) == ts                  # byte-exact
+    assert len(got_c) > len(got_u)                    # and beats uncoded
+
+
 def test_stream_multiframe():
     # A chunked "transport stream" of many frames must reassemble byte-exact.
     cfg = Config()

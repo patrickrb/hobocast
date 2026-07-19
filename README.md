@@ -37,6 +37,7 @@ cheap dongle (thermal noise, tuner frequency error, unknown sample timing).
 ```bash
 python demos/loopback.py        # push a COLOR image through the channel, byte-exact
 python demos/video_loopback.py  # real H.264+AAC color video+audio over the channel
+python demos/fec_demo.py        # error correction: FEC frames survive where uncoded die
 python demos/ber_sweep.py       # measured BER vs coherent-QPSK theory
 python tests/test_modem.py      # regression tests
 ```
@@ -77,7 +78,9 @@ color and sound to everyone's cheap dongle is the point, this is the way.
 - **M3 done** — real color video + audio: an ffmpeg H.264+AAC MPEG-TS chunked
   into a BOXCAR frame-train, through the channel, reassembled and playable
   (157/157 frames, byte-exact).
+- **M2 done** — forward error correction: rate-1/2 convolutional coding + Viterbi
+  recovers whole frames several dB deeper into the noise (7/7 at 8 dB where
+  uncoded gets 0/7).
 
-Next: **M2** forward error correction (clean up the cell edge), then **M4** real
-SDR hardware (RTL-SDR capture in, HackRF transmit out). See the
+Next: **M4** real SDR hardware (RTL-SDR capture in, HackRF transmit out). See the
 [roadmap](docs/roadmap.md).

@@ -5,18 +5,31 @@ each its own preamble + CRC, and modulate them into one continuous IQ burst-trai
 The receiver walks the stream, re-acquiring and decoding frame by frame, so a lost
 frame is a localized glitch rather than a stream-ending catastrophe — exactly how
 you'd want digital TV to degrade.
+
+Two framing modes:
+  * uncoded (cfg.fec=False): variable-length frames, length carried in a header
+    the receiver peeks before decoding the body.
+  * coded (cfg.fec=True): fixed-size frames protected end-to-end by the rate-1/2
+    convolutional code, so the symbol count is constant and no peek is needed.
 """
+
+import zlib
 
 import numpy as np
 
+from .fec import conv_encode, viterbi_decode
 from .modem import (
     Config,
     _acquire,
+    _bits_to_bytes,
+    _bits_to_qpsk,
+    _bytes_to_bits,
     _demod_data,
     _peek_length,
     _qpsk_to_bits,
     frame_data_symbols,
     modulate,
+    modulate_symbols,
     parse_frame,
     rrc_taps,
 )
@@ -34,6 +47,38 @@ def frames_to_ts(frames: list[bytes]) -> bytes:
     return b"".join(frames)
 
 
+# --- coded (FEC) fixed-frame helpers --------------------------------------
+
+def _coded_symbols(size: int) -> int:
+    """Data symbols in a coded frame carrying a `size`-byte fixed payload."""
+    info_bits = (2 + size + 4) * 8  # len(2) + padded payload + crc(4)
+    return info_bits + 6            # +TAIL bits, then /2 for QPSK -> +TAIL symbols
+
+
+def _build_coded_frame_syms(payload: bytes, size: int) -> np.ndarray:
+    if len(payload) > size:
+        raise ValueError("payload larger than fixed frame size")
+    body = len(payload).to_bytes(2, "big") + payload + bytes(size - len(payload))
+    crc = zlib.crc32(body).to_bytes(4, "big")
+    return _bits_to_qpsk(conv_encode(_bytes_to_bits(body + crc)))
+
+
+def _parse_coded_frame(uncoded_bits: np.ndarray, size: int):
+    data = _bits_to_bytes(uncoded_bits)
+    if len(data) < 2 + size + 4:
+        return None
+    length = int.from_bytes(data[:2], "big")
+    if length > size:
+        return None
+    body = data[: 2 + size]
+    crc_rx = int.from_bytes(data[2 + size : 2 + size + 4], "big")
+    if zlib.crc32(body) != crc_rx:
+        return None
+    return data[2 : 2 + length]
+
+
+# --- transmit --------------------------------------------------------------
+
 def modulate_stream(payloads: list[bytes], cfg: Config = Config(), gap_syms: int = 32) -> np.ndarray:
     """Modulate payloads into one IQ burst-train, separated by short quiet gaps."""
     if not payloads:
@@ -43,9 +88,14 @@ def modulate_stream(payloads: list[bytes], cfg: Config = Config(), gap_syms: int
     for i, p in enumerate(payloads):
         if i:
             parts.append(gap)
-        parts.append(modulate(p, cfg))
+        if cfg.fec:
+            parts.append(modulate_symbols(_build_coded_frame_syms(p, cfg.fec_payload), cfg))
+        else:
+            parts.append(modulate(p, cfg))
     return np.concatenate(parts)
 
+
+# --- receive ---------------------------------------------------------------
 
 def receive_stream(
     rx: np.ndarray,
@@ -62,7 +112,8 @@ def receive_stream(
     taps = rrc_taps(cfg.beta, cfg.sps, cfg.span)
     mf = np.convolve(rx, taps)
     P, sps = cfg.preamble_len, cfg.sps
-    min_frame = (P + frame_data_symbols(0)) * sps
+    coded_syms = _coded_symbols(cfg.fec_payload) if cfg.fec else 0
+    min_frame = (P + (coded_syms if cfg.fec else frame_data_symbols(0))) * sps
 
     payloads: list = []
     start = 0
@@ -73,12 +124,19 @@ def receive_stream(
         kf, phi0, omega, ratio = acq
         if ratio < min_ratio:
             break  # only noise ahead — end of stream
-        length = _peek_length(mf, kf, phi0, omega, cfg)
-        if length < 0 or length > 10_000_000:
-            start = int(kf + P * sps) + 1  # implausible; step past this peak
-            continue
-        d_syms = frame_data_symbols(length)
-        out = _demod_data(mf, kf, phi0, omega, d_syms, cfg)
-        payloads.append(parse_frame(_qpsk_to_bits(out)))
-        start = int(kf + (P + d_syms) * sps)
+
+        if cfg.fec:
+            out = _demod_data(mf, kf, phi0, omega, coded_syms, cfg)
+            info = viterbi_decode(_qpsk_to_bits(out))
+            payloads.append(_parse_coded_frame(info, cfg.fec_payload))
+            start = int(kf + (P + coded_syms) * sps)
+        else:
+            length = _peek_length(mf, kf, phi0, omega, cfg)
+            if length < 0 or length > 10_000_000:
+                start = int(kf + P * sps) + 1  # implausible; step past this peak
+                continue
+            d_syms = frame_data_symbols(length)
+            out = _demod_data(mf, kf, phi0, omega, d_syms, cfg)
+            payloads.append(parse_frame(_qpsk_to_bits(out)))
+            start = int(kf + (P + d_syms) * sps)
     return payloads

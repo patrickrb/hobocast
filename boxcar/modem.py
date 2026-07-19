@@ -26,6 +26,8 @@ class Config:
     span: int = 8             # RRC length in symbols
     preamble_len: int = 64    # Zadoff-Chu preamble length (symbols)
     zc_root: int = 25         # ZC root (coprime with preamble_len)
+    fec: bool = False         # rate-1/2 convolutional coding (see boxcar/fec.py)
+    fec_payload: int = 1316   # fixed payload bytes per coded frame (7 TS packets)
 
     @property
     def rsym(self) -> float:
@@ -94,12 +96,16 @@ def parse_frame(bits: np.ndarray):
 
 # --- transmit --------------------------------------------------------------
 
-def modulate(payload: bytes, cfg: Config = Config()) -> np.ndarray:
-    """Bytes -> complex baseband IQ ready to hand to an SDR (or the channel sim)."""
-    data_syms = _bits_to_qpsk(build_frame_bits(payload))
+def modulate_symbols(data_syms: np.ndarray, cfg: Config = Config()) -> np.ndarray:
+    """Prepend the preamble and pulse-shape a block of data symbols into IQ."""
     syms = np.concatenate([zc_preamble(cfg), data_syms])
     taps = rrc_taps(cfg.beta, cfg.sps, cfg.span)
     return np.convolve(upsample(syms, cfg.sps), taps)
+
+
+def modulate(payload: bytes, cfg: Config = Config()) -> np.ndarray:
+    """Bytes -> complex baseband IQ ready to hand to an SDR (or the channel sim)."""
+    return modulate_symbols(_bits_to_qpsk(build_frame_bits(payload)), cfg)
 
 
 # --- receive ---------------------------------------------------------------
