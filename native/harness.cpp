@@ -8,6 +8,7 @@
 // byte-for-byte. Exits non-zero if nothing decoded.
 #include "boxcar_rx.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -37,12 +38,15 @@ int main(int argc, char** argv) {
     const char* inPath = argv[1];
     const char* outPath = argv[2];
     bool cs8 = false;
+    long chunk = 0;  // >0: stream via feed() in chunks of this many IQ samples
     Config cfg;
     for (int i = 3; i < argc; ++i) {
         if (!strcmp(argv[i], "--cs8")) cs8 = true;
         else if (!strcmp(argv[i], "--fec")) cfg.fec = true;
         else if (!strcmp(argv[i], "--packets") && i + 1 < argc)
             cfg.fec_payload = 188 * atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--chunk") && i + 1 < argc)
+            chunk = atol(argv[++i]);
     }
 
     std::vector<uint8_t> raw = readFile(inPath);
@@ -53,7 +57,20 @@ int main(int argc, char** argv) {
             : fromCu8(raw.data(), raw.size());
 
     BoxcarRx rx(cfg);
-    std::vector<uint8_t> ts = rx.receiveStream(iq);
+    std::vector<uint8_t> ts;
+    if (chunk > 0) {
+        // Stream the capture in small chunks, exactly as a live dongle delivers
+        // it. Result must be byte-identical to the one-shot receiveStream().
+        for (size_t off = 0; off < iq.size(); off += chunk) {
+            size_t m = std::min((size_t)chunk, iq.size() - off);
+            std::vector<uint8_t> part = rx.feed(iq.data() + off, m);
+            ts.insert(ts.end(), part.begin(), part.end());
+        }
+        std::vector<uint8_t> tail = rx.flush();
+        ts.insert(ts.end(), tail.begin(), tail.end());
+    } else {
+        ts = rx.receiveStream(iq);
+    }
     const Stats& s = rx.stats();
 
     FILE* out = fopen(outPath, "wb");

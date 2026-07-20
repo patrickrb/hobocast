@@ -51,6 +51,14 @@ public:
     // boxcar.stream.receive_stream + frames_to_ts with CRC drops dropped.
     std::vector<uint8_t> receiveStream(const std::vector<cf>& rx);
 
+    // --- streaming API (the phone: IQ arrives in small chunks) -------------
+    // Push a chunk of complex baseband IQ; returns any transport-stream bytes
+    // decoded so far during this call (may be empty). Call flush() at end of
+    // stream to decode the trailing frames. Byte-for-byte identical to feeding
+    // the same samples to receiveStream() in one shot.
+    std::vector<uint8_t> feed(const cf* rx, size_t n);
+    std::vector<uint8_t> flush();
+
     const Stats& stats() const { return stats_; }
 
 private:
@@ -58,6 +66,13 @@ private:
     Stats stats_;
     std::vector<double> taps_;  // RRC matched filter
     std::vector<cf> zc_;        // preamble reference
+
+    // Streaming state.
+    std::vector<cf> sbuf_;  // matched-filtered samples; sbuf_[0] is abs index sBase_
+    long sBase_ = 0;        // absolute stream index of sbuf_[0]
+    long sCur_ = 0;         // absolute cursor: next frame search starts here
+    std::vector<cf> ring_;  // last taps_.size() raw IQ samples (streaming conv)
+    long rawSeen_ = 0;      // absolute count of raw samples fed
 
     struct Acq { double kf; double phi0; double omega; double ratio; bool ok; };
 
@@ -69,6 +84,8 @@ private:
                               double omega, long nSyms) const;
     long peekLength(const std::vector<cf>& mf, double kf, double phi0,
                     double omega) const;
+    void appendMatched(const cf* rx, size_t n);  // streaming matched filter
+    void drainInto(std::vector<uint8_t>& ts, bool flush);  // decode buffered frames
 };
 
 }  // namespace hobocast

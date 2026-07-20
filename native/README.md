@@ -27,6 +27,16 @@ C++     boxcar_harness tx.cu8 rx.ts --fec          # receive
 Verified cases: coded (FEC) and uncoded paths, clean and through AWGN + a
 +1500 Hz carrier offset + a 0.4-sample timing offset.
 
+### Streaming, too
+
+The phone gets IQ in small chunks, not one big capture, so `BoxcarRx` also
+exposes `feed()`/`flush()`. Feeding the same samples in dongle-sized chunks is
+byte-identical to the one-shot decode — verified at chunk sizes 4k/16k/64k/128k:
+
+```bash
+boxcar_harness capture.cu8 out.ts --fec --chunk 65536   # == one-shot output
+```
+
 ## Build & run (desktop, no NDK)
 
 With CMake:

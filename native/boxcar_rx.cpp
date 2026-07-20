@@ -315,63 +315,137 @@ long BoxcarRx::peekLength(const std::vector<cf>& mf, double kf, double phi0,
     return v;
 }
 
-std::vector<uint8_t> BoxcarRx::receiveStream(const std::vector<cf>& rx) {
-    stats_ = Stats{};
-    std::vector<uint8_t> ts;
-    std::vector<cf> mf = matchedFilter(rx);
+// Streaming matched filter: each raw IQ sample yields one mf sample via a
+// gather over the last taps_.size() raw samples. Reproduces np.convolve 'full'
+// output indices 0..R-1 after R raw samples (the trailing taps-1 tail only
+// finalizes at true end-of-stream, which a live receiver never needs).
+void BoxcarRx::appendMatched(const cf* rx, size_t n) {
+    long nt = (long)taps_.size();
+    if ((long)ring_.size() != nt) ring_.assign(nt, cf(0, 0));
+    for (size_t s = 0; s < n; ++s) {
+        ring_[rawSeen_ % nt] = rx[s];
+        cf m(0, 0);
+        for (long j = 0; j < nt && rawSeen_ - j >= 0; ++j)
+            m += taps_[j] * ring_[(rawSeen_ - j) % nt];
+        sbuf_.push_back(m);
+        ++rawSeen_;
+    }
+}
+
+// Decode every frame fully contained in the current buffer. When !flush we only
+// commit to a frame once a full acquisition window (and the whole frame) is
+// buffered, so the decision is identical to what receiveStream would make with
+// the complete signal in hand. flush() relaxes that at true end-of-stream.
+void BoxcarRx::drainInto(std::vector<uint8_t>& ts, bool flush) {
     int P = cfg_.preamble_len, sps = cfg_.sps;
-    const int search = 4096;
+    const long search = 4096;
     const double minRatio = 4.0;
     int size = cfg_.fec_payload;
 
-    long codedSyms = 0;
-    if (cfg_.fec) codedSyms = (long)(2 + size + 4) * 8 + Trellis::TAIL;
+    long codedSyms = cfg_.fec ? (long)(2 + size + 4) * 8 + Trellis::TAIL : 0;
     long frameSyms0 = cfg_.fec ? codedSyms : (long)(8 + 0) * 4;
     long minFrame = (long)(P + frameSyms0) * sps;
 
-    long start = 0;
-    while (start < (long)mf.size() - minFrame) {
-        Acq a = acquire(mf, start, search);
-        if (!a.ok || a.ratio < minRatio) break;  // only noise ahead
+    for (;;) {
+        long rel = sCur_ - sBase_;
+        long room = (long)sbuf_.size() - rel;
+        if (room < minFrame) break;
+        // Wait for a full search window before committing (unless flushing), so
+        // acquisition sees the same neighbourhood the batch decoder would.
+        if (!flush && room < search + minFrame) break;
+
+        Acq a = acquire(sbuf_, rel, search);
+        if (!a.ok) break;
+        if (a.ratio < minRatio) {           // no preamble in this window
+            if (flush) break;               // ...and no more data coming -> done
+            sCur_ += search;                // ...otherwise skip the quiet window
+            continue;
+        }
 
         if (cfg_.fec) {
-            std::vector<cf> out = demodData(mf, a.kf, a.phi0, a.omega, codedSyms);
-            std::vector<uint8_t> info = viterbiDecode(qpskToBits(out));
-            std::vector<uint8_t> data = bitsToBytes(info);
-            start = (long)(a.kf + (double)(P + codedSyms) * sps);
-            // parse coded frame: len(2) + payload(size) + crc(4)
-            if ((long)data.size() < 2 + size + 4) { stats_.framesDropped++; continue; }
-            long length = (data[0] << 8) | data[1];
-            if (length > size) { stats_.framesDropped++; continue; }
-            uint32_t crcRx = ((uint32_t)data[2 + size] << 24) |
-                             ((uint32_t)data[3 + size] << 16) |
-                             ((uint32_t)data[4 + size] << 8) | data[5 + size];
-            if (crc32(data.data(), 2 + size) != crcRx) { stats_.framesDropped++; continue; }
-            ts.insert(ts.end(), data.begin() + 2, data.begin() + 2 + length);
-            stats_.framesOk++;
+            long frameEnd = (long)(a.kf + (double)(P + codedSyms) * sps);
+            if (frameEnd + 2 > (long)sbuf_.size()) { if (!flush) break; else break; }
+            std::vector<cf> out = demodData(sbuf_, a.kf, a.phi0, a.omega, codedSyms);
+            std::vector<uint8_t> data = bitsToBytes(viterbiDecode(qpskToBits(out)));
+            sCur_ = sBase_ + frameEnd;
+            if ((long)data.size() >= 2 + size + 4) {
+                long length = (data[0] << 8) | data[1];
+                uint32_t crcRx = ((uint32_t)data[2 + size] << 24) |
+                                 ((uint32_t)data[3 + size] << 16) |
+                                 ((uint32_t)data[4 + size] << 8) | data[5 + size];
+                if (length <= size && crc32(data.data(), 2 + size) == crcRx) {
+                    ts.insert(ts.end(), data.begin() + 2, data.begin() + 2 + length);
+                    stats_.framesOk++;
+                } else {
+                    stats_.framesDropped++;
+                }
+            } else {
+                stats_.framesDropped++;
+            }
         } else {
-            long length = peekLength(mf, a.kf, a.phi0, a.omega);
+            long length = peekLength(sbuf_, a.kf, a.phi0, a.omega);
             if (length < 0 || length > 10'000'000) {
-                start = (long)(a.kf + (double)P * sps) + 1;
+                sCur_ = sBase_ + (long)(a.kf + (double)P * sps) + 1;
                 continue;
             }
             long dSyms = (long)(8 + length) * 4;
-            std::vector<cf> out = demodData(mf, a.kf, a.phi0, a.omega, dSyms);
+            long frameEnd = (long)(a.kf + (double)(P + dSyms) * sps);
+            if (frameEnd + 2 > (long)sbuf_.size()) { if (!flush) break; else break; }
+            std::vector<cf> out = demodData(sbuf_, a.kf, a.phi0, a.omega, dSyms);
             std::vector<uint8_t> data = bitsToBytes(qpskToBits(out));
-            start = (long)(a.kf + (double)(P + dSyms) * sps);
-            // parse frame: len(4) + payload + crc(4)
-            if ((long)data.size() < 8) { stats_.framesDropped++; continue; }
-            long len2 = ((long)data[0] << 24) | ((long)data[1] << 16) |
-                        ((long)data[2] << 8) | data[3];
-            if (len2 > (long)data.size() - 8) { stats_.framesDropped++; continue; }
-            uint32_t crcRx = ((uint32_t)data[4 + len2] << 24) |
-                             ((uint32_t)data[5 + len2] << 16) |
-                             ((uint32_t)data[6 + len2] << 8) | data[7 + len2];
-            if (crc32(data.data(), 4 + len2) != crcRx) { stats_.framesDropped++; continue; }
-            ts.insert(ts.end(), data.begin() + 4, data.begin() + 4 + len2);
-            stats_.framesOk++;
+            sCur_ = sBase_ + frameEnd;
+            if ((long)data.size() >= 8) {
+                long len2 = ((long)data[0] << 24) | ((long)data[1] << 16) |
+                            ((long)data[2] << 8) | data[3];
+                if (len2 <= (long)data.size() - 8) {
+                    uint32_t crcRx = ((uint32_t)data[4 + len2] << 24) |
+                                     ((uint32_t)data[5 + len2] << 16) |
+                                     ((uint32_t)data[6 + len2] << 8) | data[7 + len2];
+                    if (crc32(data.data(), 4 + len2) == crcRx) {
+                        ts.insert(ts.end(), data.begin() + 4, data.begin() + 4 + len2);
+                        stats_.framesOk++;
+                    } else {
+                        stats_.framesDropped++;
+                    }
+                } else {
+                    stats_.framesDropped++;
+                }
+            } else {
+                stats_.framesDropped++;
+            }
+        }
+
+        // Compact: drop everything before the cursor once it's grown enough.
+        long newRel = sCur_ - sBase_;
+        if (newRel > 65536) {
+            sbuf_.erase(sbuf_.begin(), sbuf_.begin() + newRel);
+            sBase_ = sCur_;
         }
     }
+}
+
+std::vector<uint8_t> BoxcarRx::feed(const cf* rx, size_t n) {
+    appendMatched(rx, n);
+    std::vector<uint8_t> ts;
+    drainInto(ts, /*flush=*/false);
+    return ts;
+}
+
+std::vector<uint8_t> BoxcarRx::flush() {
+    std::vector<uint8_t> ts;
+    drainInto(ts, /*flush=*/true);
+    return ts;
+}
+
+std::vector<uint8_t> BoxcarRx::receiveStream(const std::vector<cf>& rx) {
+    // One-shot decode = a single feed of the whole capture, then flush. Sharing
+    // the streaming path guarantees the two can't drift apart.
+    stats_ = Stats{};
+    sbuf_.clear(); ring_.clear();
+    sBase_ = sCur_ = rawSeen_ = 0;
+    std::vector<uint8_t> ts = feed(rx.data(), rx.size());
+    std::vector<uint8_t> tail = flush();
+    ts.insert(ts.end(), tail.begin(), tail.end());
     return ts;
 }
 
