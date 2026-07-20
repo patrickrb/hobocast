@@ -504,6 +504,11 @@ std::vector<uint8_t> BoxcarRx::feed(const cf* rx, size_t n) {
 }
 
 std::vector<uint8_t> BoxcarRx::flush() {
+    // Push the matched-filter tail (np.convolve 'full' emits taps-1 extra
+    // samples): without it the final frame of a finite capture can end a few
+    // samples past the buffer and be dropped. Harmless for a live stream.
+    std::vector<cf> tail(taps_.size(), cf(0, 0));
+    appendMatched(tail.data(), tail.size());
     std::vector<uint8_t> ts;
     drainInto(ts, /*flush=*/true);
     return ts;

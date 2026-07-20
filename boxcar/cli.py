@@ -120,6 +120,31 @@ def cmd_stream(args) -> int:
     return 0
 
 
+def cmd_rate(args) -> int:
+    """Print the BOXCAR payload bitrate (bit/s) for a profile.
+
+    This is the transport-stream bitrate the link carries. Encoding the TS as
+    CBR at exactly this rate keeps transmit and playback in lockstep — the demo
+    scripts pass it to ffmpeg's -muxrate.
+    """
+    cfg = _cfg(args)
+    gap = 32  # modulate_stream_iter default gap_syms
+    if cfg.fec:
+        from .stream import _coded_symbols
+        data_syms = _coded_symbols(cfg.fec_payload)
+    else:
+        from .modem import frame_data_symbols
+        data_syms = frame_data_symbols(cfg.fec_payload)
+    frame_samples = (cfg.preamble_len + data_syms + gap) * cfg.sps
+    rate = cfg.fec_payload * 8 * cfg.fs / frame_samples
+    if args.human:
+        print(f"payload {rate/1000:.1f} kbit/s  (fs={int(cfg.fs)} sps={cfg.sps} "
+              f"fec={'on' if cfg.fec else 'off'} packets={args.packets})")
+    else:
+        print(int(rate))
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="boxcar", description="BOXCAR digital-TV modem")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -151,6 +176,11 @@ def main(argv=None) -> int:
     st.add_argument("--max-frames", type=int, default=0,
                     help="stop after N frames (0 = unlimited; bounds --loop)")
     st.set_defaults(func=cmd_stream)
+
+    rt = sub.add_parser("rate", parents=[common],
+                        help="print the payload bitrate (bit/s) for a profile")
+    rt.add_argument("--human", action="store_true", help="readable summary instead of raw bit/s")
+    rt.set_defaults(func=cmd_rate)
 
     args = p.parse_args(argv)
     return args.func(args)

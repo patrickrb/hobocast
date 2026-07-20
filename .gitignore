@@ -8,6 +8,16 @@ venv/
 # Generated demo output
 out/
 
+# Demo media + rendered IQ + built native binaries (reproducible, not committed)
+media/
+*.cs8
+*.cu8
+*.iq16
+*.ts
+native/boxcar_harness
+native/boxcar_harness.exe
+*.obj
+
 # Editors / OS
 .vscode/
 .idea/
