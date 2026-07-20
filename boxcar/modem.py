@@ -28,6 +28,9 @@ class Config:
     zc_root: int = 25         # ZC root (coprime with preamble_len)
     fec: bool = False         # rate-1/2 convolutional coding (see boxcar/fec.py)
     fec_payload: int = 1316   # fixed payload bytes per coded frame (7 TS packets)
+    soft: bool = False        # soft-decision Viterbi (RX-only; ~2 dB gain)
+    interleave: bool = False  # block-interleave coded bits (burst-error defence)
+    interleave_depth: int = 32  # interleaver columns (spread) when interleave=True
 
     @property
     def rsym(self) -> float:

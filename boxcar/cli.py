@@ -21,7 +21,12 @@ from .stream import frames_to_ts, modulate_stream, receive_stream, ts_to_frames
 
 
 def _cfg(args) -> Config:
-    return Config(fec=args.fec, fec_payload=188 * args.packets)
+    return Config(
+        fec=args.fec,
+        fec_payload=188 * args.packets,
+        soft=getattr(args, "soft", False),
+        interleave=getattr(args, "interleave", False),
+    )
 
 
 def cmd_tx(args) -> int:
@@ -58,6 +63,10 @@ def main(argv=None) -> int:
     common.add_argument("--fmt", choices=["cu8", "cs8"], default="cu8",
                         help="IQ byte format (cu8=RTL-SDR, cs8=HackRF)")
     common.add_argument("--fec", action="store_true", help="rate-1/2 FEC")
+    common.add_argument("--soft", action="store_true",
+                        help="soft-decision Viterbi (RX; ~2 dB gain). Waveform-compatible.")
+    common.add_argument("--interleave", action="store_true",
+                        help="block-interleave coded bits (burst defence). TX+RX must match.")
     common.add_argument("--packets", type=int, default=7,
                         help="TS packets per frame (payload size)")
 

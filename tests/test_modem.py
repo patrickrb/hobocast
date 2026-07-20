@@ -96,6 +96,83 @@ def test_fec_stream_beats_uncoded():
     assert len(got_c) > len(got_u)                    # and beats uncoded
 
 
+def test_soft_viterbi_roundtrip():
+    # Soft decode of clean symbols must recover the exact info bits.
+    from boxcar.fec import conv_encode, viterbi_decode_soft
+
+    rng = np.random.default_rng(20)
+    bits = rng.integers(0, 2, 1500).astype(np.uint8)
+    coded = conv_encode(bits)
+    # Map coded bits to ideal ±1 soft values (bit 0 -> +1, bit 1 -> -1).
+    soft = 1.0 - 2.0 * coded
+    assert np.array_equal(viterbi_decode_soft(soft), bits)
+
+
+def test_soft_viterbi_beats_hard():
+    # At a fixed noise level, soft decision should correct at least as many
+    # frames as hard — and strictly more near the cliff.
+    from boxcar.fec import conv_encode, viterbi_decode, viterbi_decode_soft
+
+    rng = np.random.default_rng(21)
+    hard_fail = soft_fail = 0
+    for _ in range(60):
+        bits = rng.integers(0, 2, 400).astype(np.uint8)
+        coded = conv_encode(bits)
+        tx = 1.0 - 2.0 * coded.astype(float)          # ±1
+        rx = tx + rng.normal(0, 0.9, len(tx))          # heavy AWGN
+        hard = viterbi_decode((rx < 0).astype(np.uint8))
+        soft = viterbi_decode_soft(rx)
+        hard_fail += not np.array_equal(hard, bits)
+        soft_fail += not np.array_equal(soft, bits)
+    assert soft_fail < hard_fail  # soft strictly wins deep in the noise
+
+
+def test_interleaver_is_bijection():
+    from boxcar.fec import interleaver_perm
+
+    for n, depth in [(21164, 32), (1000, 16), (257, 7)]:
+        perm = interleaver_perm(n, depth)
+        assert len(perm) == n
+        assert np.array_equal(np.sort(perm), np.arange(n))  # a true permutation
+
+
+def test_interleaved_stream_byte_exact():
+    # Interleave + soft decode must still be byte-exact through a clean-ish channel.
+    rng = np.random.default_rng(22)
+    ts = rng.integers(0, 256, 188 * 21, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, 7)
+    cfg = Config(fec=True, soft=True, interleave=True)
+    rx = apply_channel(modulate_stream(frames, cfg), cfg,
+                       es_n0_db=12.0, cfo_hz=1500.0, frac_delay=0.4, seed=22)
+    got = receive_stream(rx, cfg)
+    assert all(p is not None for p in got)
+    assert frames_to_ts(got) == ts
+
+
+def test_interleave_survives_bursts():
+    # A burst of consecutive coded-bit errors overwhelms the Viterbi decoder
+    # locally, but interleaving scatters that burst into isolated errors it can
+    # fix. Tested at the codeword level so it's about the code, not acquisition
+    # (a burst that erases a preamble loses the frame no matter what).
+    from boxcar.fec import conv_encode, interleaver_perm, viterbi_decode
+
+    rng = np.random.default_rng(23)
+    bits = rng.integers(0, 2, 600).astype(np.uint8)
+    coded = conv_encode(bits)
+    perm = interleaver_perm(len(coded), 32)
+    burst = slice(100, 140)  # 40 consecutive on-air bit errors
+
+    plain = coded.copy()
+    plain[burst] ^= 1
+    assert not np.array_equal(viterbi_decode(plain), bits)  # burst kills it
+
+    woven = coded[perm].copy()
+    woven[burst] ^= 1
+    deint = np.empty_like(woven)
+    deint[perm] = woven
+    assert np.array_equal(viterbi_decode(deint), bits)  # interleaving saves it
+
+
 def test_sdr_format_roundtrip():
     # The 8-bit CU8/CS8 converters must preserve IQ shape and survive a round-trip.
     from boxcar.sdr_io import from_cs8, from_cu8, to_cs8, to_cu8

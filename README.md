@@ -38,8 +38,9 @@ cheap dongle (thermal noise, tuner frequency error, unknown sample timing).
 python demos/loopback.py        # push a COLOR image through the channel, byte-exact
 python demos/video_loopback.py  # real H.264+AAC color video+audio over the channel
 python demos/fec_demo.py        # error correction: FEC frames survive where uncoded die
+python demos/robustness_demo.py # soft-decision (~1.5 dB) + interleaving (burst defence)
 python demos/ber_sweep.py       # measured BER vs coherent-QPSK theory
-python tests/test_modem.py      # regression tests
+python tests/test_modem.py      # regression tests (15)
 ```
 
 The loopback recovers a color test image **bit-for-bit** through a 15 dB channel
@@ -80,7 +81,9 @@ color and sound to everyone's cheap dongle is the point, this is the way.
   (157/157 frames, byte-exact).
 - **M2 done** — forward error correction: rate-1/2 convolutional coding + Viterbi
   recovers whole frames several dB deeper into the noise (7/7 at 8 dB where
-  uncoded gets 0/7).
+  uncoded gets 0/7). Plus **soft-decision** decoding (~1.5 dB more) and **block
+  interleaving** for burst/fade defence — both in `boxcar.cli`
+  (`demos/robustness_demo.py`).
 - **M4 software half done** — the receiver speaks the real dongle byte formats
   (CU8/CS8) and decodes video byte-exact through 8-bit ADC quantization
   (`demos/hardware_loopback.py`). A `boxcar.cli tx/rx` tool reads and writes the

@@ -15,8 +15,16 @@ Turn the ragged BER at the cell edge into clean video.
 - [x] Fixed-size coded frames wired into the stream layer (`cfg.fec`)
 - [x] Demo: FEC recovers 7/7 frames at 8 dB Es/N0 where uncoded gets 0/7
       (`demos/fec_demo.py`)
-- [ ] Interleaving to spread burst errors (deferred — matters most on real fading)
-- [ ] Soft-decision Viterbi for a further ~2 dB (deferred to hardware bring-up)
+- [x] Soft-decision Viterbi (`viterbi_decode_soft`, `cfg.soft`) — ~1.5 dB gain,
+      RX-only so the waveform is unchanged (29/30 vs 13/30 frames at 5.5 dB)
+- [x] Block interleaving (`cfg.interleave`) — scatters bursts the code can't
+      otherwise survive (decodes a 64-bit burst that kills the plain code).
+      `demos/robustness_demo.py` measures both; both wired into `boxcar.cli`
+
+Note: `soft`/`interleave` default **off**, so the byte-exact C++ parity still
+holds for the shipping default. Soft is waveform-compatible (turn on anytime);
+interleaving changes the wire format, so the vendored C++ receiver would need
+the matching de-interleave before shipping it on.
 
 ## M3 — Carry real video + audio ✅ (done)
 Wrap an actual media stream instead of a test image.

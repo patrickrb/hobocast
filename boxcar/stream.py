@@ -17,7 +17,7 @@ import zlib
 
 import numpy as np
 
-from .fec import conv_encode, viterbi_decode
+from .fec import conv_encode, interleaver_perm, viterbi_decode, viterbi_decode_soft
 from .modem import (
     Config,
     _acquire,
@@ -55,12 +55,39 @@ def _coded_symbols(size: int) -> int:
     return info_bits + 6            # +TAIL bits, then /2 for QPSK -> +TAIL symbols
 
 
-def _build_coded_frame_syms(payload: bytes, size: int) -> np.ndarray:
+def _build_coded_frame_syms(payload: bytes, size: int, cfg: Config = Config()) -> np.ndarray:
     if len(payload) > size:
         raise ValueError("payload larger than fixed frame size")
     body = len(payload).to_bytes(2, "big") + payload + bytes(size - len(payload))
     crc = zlib.crc32(body).to_bytes(4, "big")
-    return _bits_to_qpsk(conv_encode(_bytes_to_bits(body + crc)))
+    bits = conv_encode(_bytes_to_bits(body + crc))
+    if cfg.interleave:
+        bits = bits[interleaver_perm(len(bits), cfg.interleave_depth)]
+    return _bits_to_qpsk(bits)
+
+
+def _decode_coded_symbols(out: np.ndarray, cfg: Config) -> np.ndarray:
+    """Turn carrier-corrected QPSK symbols back into info bits (soft/hard, de-interleaved)."""
+    coded_syms = _coded_symbols(cfg.fec_payload)
+    if len(out) < coded_syms:  # pad a short final frame so the geometry is fixed
+        out = np.concatenate([out, np.zeros(coded_syms - len(out), dtype=complex)])
+    if cfg.soft:
+        soft = np.empty(2 * len(out))
+        soft[0::2] = out.real
+        soft[1::2] = out.imag
+        if cfg.interleave:
+            perm = interleaver_perm(len(soft), cfg.interleave_depth)
+            deint = np.empty_like(soft)
+            deint[perm] = soft
+            soft = deint
+        return viterbi_decode_soft(soft)
+    bits = _qpsk_to_bits(out)
+    if cfg.interleave:
+        perm = interleaver_perm(len(bits), cfg.interleave_depth)
+        deint = np.empty_like(bits)
+        deint[perm] = bits
+        bits = deint
+    return viterbi_decode(bits)
 
 
 def _parse_coded_frame(uncoded_bits: np.ndarray, size: int):
@@ -89,7 +116,7 @@ def modulate_stream(payloads: list[bytes], cfg: Config = Config(), gap_syms: int
         if i:
             parts.append(gap)
         if cfg.fec:
-            parts.append(modulate_symbols(_build_coded_frame_syms(p, cfg.fec_payload), cfg))
+            parts.append(modulate_symbols(_build_coded_frame_syms(p, cfg.fec_payload, cfg), cfg))
         else:
             parts.append(modulate(p, cfg))
     return np.concatenate(parts)
@@ -127,7 +154,7 @@ def receive_stream(
 
         if cfg.fec:
             out = _demod_data(mf, kf, phi0, omega, coded_syms, cfg)
-            info = viterbi_decode(_qpsk_to_bits(out))
+            info = _decode_coded_symbols(out, cfg)
             payloads.append(_parse_coded_frame(info, cfg.fec_payload))
             start = int(kf + (P + coded_syms) * sps)
         else:

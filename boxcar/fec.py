@@ -98,3 +98,72 @@ def viterbi_decode(coded: np.ndarray) -> np.ndarray:
         bits[i] = bb[i, s]
         s = bp[i, s]
     return bits[:-TAIL] if TAIL else bits
+
+
+# Expected ±1 amplitudes of the two coded bits for each 2-bit output symbol
+# o (o0=o>>1 on I, o1=o&1 on Q): amp = 1-2*bit.
+_AMP = np.array([[1.0, 1.0], [1.0, -1.0], [-1.0, 1.0], [-1.0, -1.0]])
+
+
+def viterbi_decode_soft(soft: np.ndarray) -> np.ndarray:
+    """Soft-decision Viterbi decode.
+
+    `soft` is the per-coded-bit received amplitude (positive favours bit 0),
+    i.e. the real/imag parts of the carrier-corrected QPSK symbols laid out
+    [I0, Q0, I1, Q1, ...]. Feeding the decoder these confidences instead of
+    hard-sliced bits buys ~2 dB of coding gain. Otherwise identical to
+    viterbi_decode (same trellis, same tail termination).
+    """
+    soft = np.asarray(soft, dtype=float)
+    t = len(soft) // 2
+    if t == 0:
+        return np.zeros(0, dtype=np.uint8)
+    y0 = soft[0:2 * t:2]
+    y1 = soft[1:2 * t:2]
+    # Per-step cost of each candidate output symbol: minimise squared distance
+    # == maximise correlation with the expected ±1 amplitudes.
+    cost = -(np.outer(y0, _AMP[:, 0]) + np.outer(y1, _AMP[:, 1]))  # (t, 4)
+
+    pm = np.full(STATES, 1e18)
+    pm[0] = 0.0
+    bp = np.empty((t, STATES), dtype=np.int64)
+    bb = np.empty((t, STATES), dtype=np.uint8)
+    ar = np.arange(STATES)
+
+    for i in range(t):
+        bm = cost[i][_PRED_OUT]            # (STATES,2) soft branch metrics
+        cand = pm[_PRED_S] + bm
+        choice = np.argmin(cand, axis=1)
+        pm = cand[ar, choice]
+        bp[i] = _PRED_S[ar, choice]
+        bb[i] = _PRED_U[ar, choice]
+
+    s = 0
+    bits = np.empty(t, dtype=np.uint8)
+    for i in range(t - 1, -1, -1):
+        bits[i] = bb[i, s]
+        s = bp[i, s]
+    return bits[:-TAIL] if TAIL else bits
+
+
+# --- block interleaving ----------------------------------------------------
+# A convolutional code shrugs off scattered bit errors but chokes on bursts (a
+# deep fade, an impulse). A block interleaver permutes the coded bits so a burst
+# on the air lands as isolated errors after de-interleaving — exactly what the
+# Viterbi decoder handles best.
+
+def interleaver_perm(n: int, depth: int = 32) -> np.ndarray:
+    """Block-interleaver permutation over n items: `interleaved[k] = coded[perm[k]]`.
+
+    Writes 0..n-1 row-major into a depth-column grid and reads it column-major,
+    so items adjacent on the air were `depth` apart in the codeword.
+    """
+    perm = np.empty(n, dtype=np.int64)
+    k = 0
+    for c in range(depth):
+        idx = c
+        while idx < n:
+            perm[k] = idx
+            k += 1
+            idx += depth
+    return perm
