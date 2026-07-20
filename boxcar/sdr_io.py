@@ -24,9 +24,13 @@ def _scale(iq: np.ndarray) -> float:
     return _PEAK / peak if peak > 0 else 1.0
 
 
-def to_cu8(iq: np.ndarray) -> np.ndarray:
-    """Complex float IQ -> RTL-SDR CU8 byte stream (I0,Q0,I1,Q1,...)."""
-    s = _scale(iq)
+def to_cu8(iq: np.ndarray, scale: float | None = None) -> np.ndarray:
+    """Complex float IQ -> RTL-SDR CU8 byte stream (I0,Q0,I1,Q1,...).
+
+    `scale` fixes the amplitude mapping; pass a constant when writing a
+    continuous stream block-by-block so the level doesn't jump between blocks.
+    """
+    s = _scale(iq) if scale is None else scale
     out = np.empty(len(iq) * 2, dtype=np.uint8)
     out[0::2] = np.clip(np.round(iq.real * s) + 127.5, 0, 255).astype(np.uint8)
     out[1::2] = np.clip(np.round(iq.imag * s) + 127.5, 0, 255).astype(np.uint8)
@@ -39,13 +43,18 @@ def from_cu8(buf) -> np.ndarray:
     return (b[0::2] - 127.5) + 1j * (b[1::2] - 127.5)
 
 
-def to_cs8(iq: np.ndarray) -> np.ndarray:
-    """Complex float IQ -> HackRF CS8 byte stream."""
-    s = _scale(iq)
+def to_cs8(iq: np.ndarray, scale: float | None = None) -> np.ndarray:
+    """Complex float IQ -> HackRF CS8 byte stream. `scale`: see to_cu8."""
+    s = _scale(iq) if scale is None else scale
     out = np.empty(len(iq) * 2, dtype=np.int8)
     out[0::2] = np.clip(np.round(iq.real * s), -128, 127).astype(np.int8)
     out[1::2] = np.clip(np.round(iq.imag * s), -128, 127).astype(np.int8)
     return out
+
+
+def fixed_scale(iq: np.ndarray) -> float:
+    """The scale to_cu8/to_cs8 would pick for `iq` — capture it once, reuse it."""
+    return _scale(iq)
 
 
 def from_cs8(buf) -> np.ndarray:

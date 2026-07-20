@@ -96,6 +96,35 @@ def test_fec_stream_beats_uncoded():
     assert len(got_c) > len(got_u)                    # and beats uncoded
 
 
+def test_stream_iter_matches_batch():
+    # The incremental (streaming) modulator must produce the exact same waveform
+    # as the one-shot modulate_stream over the same frames.
+    from boxcar import modulate_stream_iter
+
+    cfg = Config(fec=True)
+    rng = np.random.default_rng(30)
+    frames = ts_to_frames(rng.integers(0, 256, 188 * 7 * 4, dtype=np.uint8).tobytes(), 7)
+    batch = modulate_stream(frames, cfg)
+    incremental = np.concatenate(list(modulate_stream_iter(frames, cfg)))
+    assert np.array_equal(batch, incremental)
+
+
+def test_stream_iter_looped_decodes():
+    # A looped frame source (broadcast) reassembles to the input repeated.
+    from boxcar import modulate_stream_iter
+
+    cfg = Config(fec=True)
+    rng = np.random.default_rng(31)
+    ts = rng.integers(0, 256, 188 * 7 * 3, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, 7)
+    looped = frames * 2
+    tx = np.concatenate(list(modulate_stream_iter(looped, cfg)))
+    rx = apply_channel(tx, cfg, es_n0_db=13.0, cfo_hz=1500.0, frac_delay=0.4, seed=31)
+    got = receive_stream(rx, cfg)
+    assert all(p is not None for p in got)
+    assert frames_to_ts(got) == ts * 2
+
+
 def test_soft_viterbi_roundtrip():
     # Soft decode of clean symbols must recover the exact info bits.
     from boxcar.fec import conv_encode, viterbi_decode_soft

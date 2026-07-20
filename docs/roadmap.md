@@ -42,6 +42,9 @@ Get bytes over the air, not just through a simulated channel.
 - [x] `boxcar.cli tx/rx`: file ⇄ IQ capture in those formats, FEC-aware
 - [x] Full chain verified through **8-bit ADC quantization**: 157/157 frames
       byte-exact (`demos/hardware_loopback.py`), plus regression tests
+- [x] Continuous broadcast transmitter: `boxcar.cli stream` reads a live/looping
+      TS from stdin and emits an endless IQ burst-train to stdout — pipes
+      straight into `hackrf_transfer -t -` (verified byte-exact, incl. looping)
 - [ ] TX via HackRF (`hackrf_transfer`) or a GNU Radio flowgraph — *needs radio*
 - [ ] RX capture from a real RTL-SDR feeding the Python RX — *needs radio*
 - [ ] Bench loopback over a cable/attenuator, then over the air — *needs radio*

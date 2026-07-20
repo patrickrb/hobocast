@@ -8,6 +8,10 @@
     rtl_sdr -f 906000000 -s 2400000 -g 40 capture.cu8
     python -m boxcar.cli rx capture.cu8 out.ts --fmt cu8 --fec
 
+    # continuous broadcast: live TS in, endless IQ out, straight into a HackRF:
+    ffmpeg ... -f mpegts - | python -m boxcar.cli stream - - --fmt cs8 --fec \
+        | hackrf_transfer -t - -f 906000000 -s 2400000 -a 1 -x 20
+
 The IQ formats (cu8/cs8) are exactly what `rtl_sdr` and `hackrf_transfer` speak,
 so BOXCAR drops into a real hardware chain with no glue.
 """
@@ -16,8 +20,15 @@ import argparse
 import sys
 
 from .modem import Config
-from .sdr_io import read_iq, write_iq
-from .stream import frames_to_ts, modulate_stream, receive_stream, ts_to_frames
+from .sdr_io import fixed_scale, read_iq, to_cs8, to_cu8, write_iq
+from .stream import (
+    TS_PACKET,
+    frames_to_ts,
+    modulate_stream,
+    modulate_stream_iter,
+    receive_stream,
+    ts_to_frames,
+)
 
 
 def _cfg(args) -> Config:
@@ -55,6 +66,59 @@ def cmd_rx(args) -> int:
     return 0 if good else 1
 
 
+def _frames_from(fileobj, step: int, loop: bool, max_frames: int):
+    """Yield frame-sized TS chunks from a byte stream; optionally loop forever."""
+    count = 0
+    if loop:
+        data = fileobj.read()  # loop implies a finite source we can replay
+        if not data:
+            return
+        while True:
+            for i in range(0, len(data), step):
+                if max_frames and count >= max_frames:
+                    return
+                yield data[i:i + step]
+                count += 1
+    else:
+        while True:
+            chunk = fileobj.read(step)
+            if not chunk or (max_frames and count >= max_frames):
+                return
+            yield chunk
+            count += 1
+
+
+def cmd_stream(args) -> int:
+    """Continuous transmit: live/looping TS in, endless IQ burst-train out."""
+    cfg = _cfg(args)
+    step = TS_PACKET * args.packets
+    inp = sys.stdin.buffer if args.input == "-" else open(args.input, "rb")
+    out = sys.stdout.buffer if args.output == "-" else open(args.output, "wb")
+    writer = to_cu8 if args.fmt == "cu8" else to_cs8
+
+    scale = None
+    blocks = samples = 0
+    try:
+        for block in modulate_stream_iter(_frames_from(inp, step, args.loop, args.max_frames), cfg):
+            if len(block) == 0:
+                continue
+            if scale is None:
+                scale = fixed_scale(block)  # lock the amplitude from the first frame
+            out.write(writer(block, scale).tobytes())
+            blocks += 1
+            samples += len(block)
+    finally:
+        out.flush()
+        if args.output != "-":
+            out.close()
+        if args.input != "-":
+            inp.close()
+    print(f"stream: {samples} IQ samples in {blocks} blocks -> "
+          f"{args.output} ({args.fmt}, fec={'on' if args.fec else 'off'}, "
+          f"loop={'on' if args.loop else 'off'})", file=sys.stderr)
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="boxcar", description="BOXCAR digital-TV modem")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -75,6 +139,14 @@ def main(argv=None) -> int:
 
     rx = sub.add_parser("rx", parents=[common], help="IQ -> file")
     rx.add_argument("input"); rx.add_argument("output"); rx.set_defaults(func=cmd_rx)
+
+    st = sub.add_parser("stream", parents=[common],
+                        help="continuous TS -> endless IQ ('-' = stdin/stdout)")
+    st.add_argument("input"); st.add_argument("output")
+    st.add_argument("--loop", action="store_true", help="replay the input forever")
+    st.add_argument("--max-frames", type=int, default=0,
+                    help="stop after N frames (0 = unlimited; bounds --loop)")
+    st.set_defaults(func=cmd_stream)
 
     args = p.parse_args(argv)
     return args.func(args)

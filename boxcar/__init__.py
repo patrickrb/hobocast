@@ -16,6 +16,7 @@ from .channel import apply_channel
 from .stream import (
     frames_to_ts,
     modulate_stream,
+    modulate_stream_iter,
     receive_stream,
     ts_to_frames,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "receive_symbols",
     "apply_channel",
     "modulate_stream",
+    "modulate_stream_iter",
     "receive_stream",
     "ts_to_frames",
     "frames_to_ts",

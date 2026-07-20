@@ -106,6 +106,12 @@ def _parse_coded_frame(uncoded_bits: np.ndarray, size: int):
 
 # --- transmit --------------------------------------------------------------
 
+def _modulate_frame(payload: bytes, cfg: Config) -> np.ndarray:
+    if cfg.fec:
+        return modulate_symbols(_build_coded_frame_syms(payload, cfg.fec_payload, cfg), cfg)
+    return modulate(payload, cfg)
+
+
 def modulate_stream(payloads: list[bytes], cfg: Config = Config(), gap_syms: int = 32) -> np.ndarray:
     """Modulate payloads into one IQ burst-train, separated by short quiet gaps."""
     if not payloads:
@@ -115,11 +121,24 @@ def modulate_stream(payloads: list[bytes], cfg: Config = Config(), gap_syms: int
     for i, p in enumerate(payloads):
         if i:
             parts.append(gap)
-        if cfg.fec:
-            parts.append(modulate_symbols(_build_coded_frame_syms(p, cfg.fec_payload, cfg), cfg))
-        else:
-            parts.append(modulate(p, cfg))
+        parts.append(_modulate_frame(p, cfg))
     return np.concatenate(parts)
+
+
+def modulate_stream_iter(frames, cfg: Config = Config(), gap_syms: int = 32):
+    """Yield IQ blocks for a (possibly endless) iterator of frame payloads.
+
+    The output is one continuous burst-train — a quiet gap before every frame
+    but the very first — identical in structure to modulate_stream() but produced
+    incrementally, so a live/looping transmitter never has to hold it all in RAM.
+    """
+    gap = np.zeros(gap_syms * cfg.sps, dtype=complex)
+    first = True
+    for p in frames:
+        if not first:
+            yield gap
+        first = False
+        yield _modulate_frame(p, cfg)
 
 
 # --- receive ---------------------------------------------------------------
