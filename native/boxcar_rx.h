@@ -32,6 +32,7 @@ struct Config {
     bool fec = false;         // rate-1/2 convolutional coding
     int fec_payload = 1316;   // fixed payload bytes per coded frame
     bool soft = false;        // soft-decision Viterbi (RX-only; ~1.5 dB gain)
+    double cfo_search_hz = 0.0;  // coarse carrier search half-range; 0 = off
 };
 
 struct Stats {

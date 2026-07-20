@@ -35,6 +35,15 @@ waveform is unchanged. Measured on a 5.5 dB capture: **hard recovers 54/157
 frames, soft recovers 145/157.** At a clean 12 dB both stay byte-exact, so
 turning it on is free. (Matches `boxcar.fec.viterbi_decode_soft` upstream.)
 
+### Coarse carrier acquisition
+
+`--cfo-search <Hz>` (or `Config::cfo_search_hz`) sweeps trial carrier offsets so
+the receiver locks through a real tuner's PPM error. A Zadoff-Chu correlation
+couples frequency to timing — an uncorrected offset shifts the peak and wrecks
+the phase fit — so this is required on real hardware, not optional: at a 25 kHz
+offset (~28 ppm at 906 MHz) the receiver goes from **0/157 frames to 157/157
+byte-exact**. Default off (it costs acquisition time); the phone turns it on.
+
 ### Streaming, too
 
 The phone gets IQ in small chunks, not one big capture, so `BoxcarRx` also

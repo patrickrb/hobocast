@@ -44,6 +44,8 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--cs8")) cs8 = true;
         else if (!strcmp(argv[i], "--fec")) cfg.fec = true;
         else if (!strcmp(argv[i], "--soft")) cfg.soft = true;
+        else if (!strcmp(argv[i], "--cfo-search") && i + 1 < argc)
+            cfg.cfo_search_hz = atof(argv[++i]);
         else if (!strcmp(argv[i], "--packets") && i + 1 < argc)
             cfg.fec_payload = 188 * atoi(argv[++i]);
         else if (!strcmp(argv[i], "--chunk") && i + 1 < argc)

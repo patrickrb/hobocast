@@ -279,11 +279,37 @@ BoxcarRx::Acq BoxcarRx::acquire(const std::vector<cf>& mf, long start,
     if (search <= 0) return {0, 0, 0, 0, false};
 
     std::vector<double> mag(search);
-    for (long k = 0; k < search; ++k) {
-        cf acc(0, 0);
-        for (int p = 0; p < P; ++p)
-            acc += std::conj(zc_[p]) * mf[start + k + (long)p * sps];
-        mag[k] = std::abs(acc);
+    if (cfg_.cfo_search_hz > 0.0) {
+        // Coarse carrier search: a Zadoff-Chu correlation couples frequency to
+        // timing, so an uncorrected offset (real tuner PPM error, ~27 kHz at
+        // 906 MHz) shifts the peak and wrecks the phase fit. Sweep trial offsets
+        // folded into the reference; the strongest peak un-shifts the timing.
+        // (Mirrors boxcar.modem._acquire.) On the phone this is the difference
+        // between locking and never locking.
+        double df = 0.5 * cfg_.fs / (P * sps);
+        double best = -1.0;
+        std::vector<cf> reff(P);
+        std::vector<double> m(search);
+        for (double f = -cfg_.cfo_search_hz; f <= cfg_.cfo_search_hz + df / 2; f += df) {
+            for (int p = 0; p < P; ++p)
+                reff[p] = std::conj(zc_[p]) *
+                          std::polar(1.0, -2.0 * PI * f * (double)(p * sps) / cfg_.fs);
+            double peak = -1.0;
+            for (long k = 0; k < search; ++k) {
+                cf acc(0, 0);
+                for (int p = 0; p < P; ++p) acc += reff[p] * mf[start + k + (long)p * sps];
+                m[k] = std::abs(acc);
+                if (m[k] > peak) peak = m[k];
+            }
+            if (peak > best) { best = peak; mag = m; }
+        }
+    } else {
+        for (long k = 0; k < search; ++k) {
+            cf acc(0, 0);
+            for (int p = 0; p < P; ++p)
+                acc += std::conj(zc_[p]) * mf[start + k + (long)p * sps];
+            mag[k] = std::abs(acc);
+        }
     }
     long k0 = (long)(std::max_element(mag.begin(), mag.end()) - mag.begin());
 
