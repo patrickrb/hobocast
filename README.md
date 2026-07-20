@@ -48,6 +48,70 @@ with +1800 Hz carrier offset and a sub-sample timing error, and writes it to
 `out/recovered.png`. The BER sweep tracks the theoretical QPSK curve within ~1 dB
 — i.e. the receiver is genuinely coherent, not faked.
 
+## Running the demo (macOS / Linux / Windows)
+
+The `demo-*` scripts drive the whole thing: encode video → BOXCAR → radio →
+decode → play. macOS and Linux use the `.sh` scripts; **Windows has a native
+PowerShell twin of every one** (same name, `.ps1`) — no Git Bash, no WSL.
+
+**One-time toolchain install:**
+
+```bash
+scripts/install-mac.sh                                   # macOS (Homebrew)
+scripts/install-linux.sh                                 # Linux / WSL2 (apt)
+```
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1   # Windows
+```
+
+The Windows installer pulls Python + numpy, FFmpeg and clang++ via winget, then
+guides the two steps it can't fully automate: the **PothosSDR** bundle
+(`rtl_sdr.exe` / `hackrf_transfer.exe`) and the **Zadig** WinUSB driver — the
+Windows equivalent of the Linux DVB blacklist, without which no libusb-based tool
+can open the dongle.
+
+**The scripts** (PowerShell shown; drop `.\`/`scripts\` and use `.sh` +
+`--flags` on macOS/Linux):
+
+```powershell
+.\demo-loopback.ps1                  # NO radio: encode -> BOXCAR -> decode -> play
+.\demo-loopback.ps1 -NoPlay          # ...and skip playback (headless / CI)
+.\demo-loopback.ps1 clip.mp4         # your own video instead of color bars
+
+.\demo-hackrf.ps1                    # transmit: color bars, or media\channel\* if present
+.\demo-hackrf.ps1 -Gain 30           # HackRF VGA gain override (0-47 dB)
+.\demo-rx.ps1                        # receive on an RTL-SDR: capture -> decode -> play
+.\demo-rx.ps1 -Loop                  # keep grabbing successive chunks
+```
+
+| Script | What it does |
+|--------|--------------|
+| `demo-loopback.ps1` / `.sh` | Whole chain in software, no radio. Great for a talk. |
+| `demo-hackrf.ps1` / `.sh` | One-command transmit: bars, or everything in `media\channel\`. |
+| `demo-rx.ps1` / `.sh` | One-command receive + play off an RTL-SDR. |
+| `scripts\tx-hackrf.ps1` | Real-time transmit of a video (or playlist), looped. |
+| `scripts\tx-file.ps1` | Loop a `.cs8` from disk (rock-solid), or render a `.ts`/video first. |
+| `scripts\tx-cycle.ps1` | Rotate a folder of clips, N seconds each, forever. |
+| `scripts\tx-obs.ps1` | Broadcast a live OBS feed (UDP → BOXCAR). |
+| `scripts\render-bars.ps1` | Color bars + 440 Hz tone → `.cs8` IQ file. |
+| `scripts\render-iq.ps1` | Trim + encode a video → `.cs8` IQ file. |
+| `scripts\rx-rtlsdr.ps1` | Capture → decode → play, with `-Loop` / `-Keep`. |
+| `scripts\build-native.ps1` | Build the fast C++ decoder (real-time RX; needs clang++). |
+| `scripts\fetch-commercials.ps1` | Pull a 90s-commercials playlist into `media\channel\`. |
+| `scripts\install-*.{sh,ps1}` | One-time toolchain install per OS. |
+
+Bash flags map to PowerShell switches: `--gain 30 --amp` → `-Gain 30 -Amp`,
+`--loop` → `-Loop`, `--seconds 8` → `-Seconds 8`. Default RF is **906 MHz**, 2.4
+Msps — override with `$env:HOBOCAST_FREQ`, `$env:HOBOCAST_RATE`, etc. (see
+`scripts/_config.ps1`). The `.ps1` scripts keep raw IQ intact the way the `.sh`
+ones do: byte-critical stages write straight to a file, and the two live transmit
+pipelines run through `cmd.exe` (byte-exact pipes) because Windows PowerShell's
+`|` would corrupt the bytes. Full walkthrough + tuning knobs: [`docs/demo.md`](docs/demo.md).
+
+> **Legal & safety:** keep the HackRF amp **off**, sessions short, indoors, no
+> external antenna. For a public venue prefer a direct coax feed + attenuator
+> into the receiver, no radiation. See `docs/demo.md`.
+
 ## Waveform at a glance
 
 | Parameter | Value | Why |

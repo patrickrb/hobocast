@@ -71,7 +71,7 @@ boxcar_decode() {
 # The payload (transport-stream) bitrate the link carries, for CBR muxing.
 boxcar_rate() { boxcar rate $FEC_FLAG --packets "$PACKETS"; }
 
-need_cmd() { command -v "$1" >/dev/null || { echo "Missing '$1' — run scripts/install-linux.sh (Linux) or scripts/install-mac.sh (macOS)." >&2; exit 1; }; }
+need_cmd() { command -v "$1" >/dev/null || { echo "Missing '$1' — run scripts/install-linux.sh (Linux), scripts/install-mac.sh (macOS), or scripts/install-windows.ps1 (Windows)." >&2; exit 1; }; }
 
 # hackrf present? (non-fatal check so filename errors surface first)
 check_hackrf() {

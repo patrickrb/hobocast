@@ -27,10 +27,48 @@ that went in. Perfect for a talk when you can't (or shouldn't) transmit.
 > pure-Python receiver will make decoding a full clip slow. It's the same DSP the
 > phone runs.
 
+## Windows
+
+Every demo script has a native **PowerShell twin** (`.ps1`) — no Git Bash, no
+WSL. `.\demo-loopback.ps1` mirrors `./demo-loopback.sh`, `scripts\tx-hackrf.ps1`
+mirrors `scripts/tx-hackrf.sh`, and so on. Install the toolchain first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+```
+
+That installs Python + numpy, FFmpeg (+ffplay) and clang++ via winget, then
+guides the two steps Windows can't fully automate: the **PothosSDR** bundle
+(`rtl_sdr.exe` / `hackrf_transfer.exe`) and the **Zadig** WinUSB driver —
+Windows' equivalent of the Linux DVB blacklist, without which no libusb-based
+tool can open the dongle. Then, from the repo root in PowerShell:
+
+```powershell
+.\demo-loopback.ps1              # encode -> BOXCAR -> decode -> play, no radio
+.\demo-loopback.ps1 -NoPlay      # ... and skip playback (headless / CI)
+.\demo-hackrf.ps1                # transmit (HackRF): bars, or media\channel\*
+.\demo-rx.ps1                    # receive (RTL-SDR): capture -> decode -> play
+scripts\tx-hackrf.ps1 clip.mp4   # loop one video, real-time
+scripts\tx-file.ps1 media\bars.cs8 -Gain 30 -Amp   # loop a pre-rendered IQ file
+scripts\render-bars.ps1 media\bars.cs8 10          # color bars + tone -> IQ
+scripts\build-native.ps1         # build the fast C++ decoder (needs clang++)
+```
+
+Bash-style flags become PowerShell switches: `--gain 30 --amp` -> `-Gain 30
+-Amp`, `--loop` -> `-Loop`. The `.ps1` scripts keep bytes intact the way the
+`.sh` ones do — every byte-critical stage writes straight to a file, and the two
+live transmit pipelines (`tx-hackrf` / `tx-obs`) run through `cmd.exe`, whose
+pipes are byte-exact (Windows PowerShell's `|` would corrupt raw IQ).
+
+Prefer Unix tooling? The `.sh` scripts also run under **Git Bash** — they're
+Windows-aware (`scripts/_config.sh` finds the right Python and the `.exe`
+decoder). And the pure-Python loopback needs only numpy, straight from
+PowerShell: `python demos\loopback.py` (see the section above).
+
 ## Transmit (HackRF)
 
 ```bash
-scripts/install-linux.sh          # or install-mac.sh — ffmpeg + hackrf + rtl-sdr + numpy
+scripts/install-linux.sh          # or install-mac.sh (macOS) / install-windows.ps1 (Windows)
 ./demo-hackrf.sh                  # color bars, or media/channel/* if present
 scripts/tx-hackrf.sh clip.mp4     # loop one video, real-time
 scripts/fetch-commercials.sh      # grab a 90s-commercials playlist into media/channel/
@@ -71,6 +109,9 @@ via the Hobocon app's digital source.
 
 ## The demo scripts
 
+Each script below has a native PowerShell twin with the same name (`.ps1` instead
+of `.sh`) for Windows — see [Windows](#windows).
+
 | Script | What it does |
 |--------|--------------|
 | `demo-loopback.sh` | Whole chain in software, no radio — encode → BOXCAR → decode → play. |
@@ -85,7 +126,7 @@ via the Hobocon app's digital source.
 | `scripts/rx-rtlsdr.sh` | Capture → decode → play. |
 | `scripts/build-native.sh` | Build the fast C++ receiver (real-time decode). |
 | `scripts/fetch-commercials.sh` | Pull a 90s-commercials playlist into `media/channel/`. |
-| `scripts/install-linux.sh` / `install-mac.sh` | Install ffmpeg + hackrf + rtl-sdr + numpy. |
+| `scripts/install-linux.sh` / `install-mac.sh` / `install-windows.ps1` | Install ffmpeg + hackrf + rtl-sdr + numpy (see [Windows](#windows)). |
 
 ## Tuning it
 
