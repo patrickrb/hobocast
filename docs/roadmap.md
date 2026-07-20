@@ -43,12 +43,19 @@ The software half is done and tested: the receiver already decodes the exact
 byte format a dongle produces. What remains is purely the physical link —
 pipe `boxcar.cli`'s output/input to `hackrf_transfer`/`rtl_sdr`.
 
-## M5 — On the phone
+## M5 — On the phone 🟡 (core done + app glue written; device-gated)
 Fold the receiver into the Hobocon app alongside the existing sources.
-- [ ] Port the RX DSP to C++/NDK (mirrors the existing `:tv-sdr` module layout)
-- [ ] Hand recovered H.264+AAC to Android `MediaCodec` for hardware decode
-- [ ] New `VideoSource` (digital) in the app's source selector
-- [ ] Live color + audio from a $30 dongle 🎉
+- [x] Port the RX DSP to portable C++ (`native/boxcar_rx.{h,cpp}`), verified
+      **byte-exact** against the Python reference (coded/uncoded, clean + noisy,
+      batch + streaming) via `native/harness.cpp`
+- [x] Streaming `feed()`/`flush()` so the phone can push dongle-sized IQ chunks
+- [x] Vendored into hobocon-app `:tv-sdr` with a JNI bridge (`boxcar_jni.cpp`),
+      Kotlin `BoxcarBridge`, and a `DigitalVideoSource`
+- [x] Play recovered H.264+AAC through the app's **existing ExoPlayer** (TS over
+      a localhost URL) instead of hand-rolling MediaCodec
+- [ ] Verify on a device: USB streaming, ExoPlayer live-TS playback, tuning
+      policy for a shared dongle — *needs Android hardware + a BOXCAR transmit*
+- [ ] Live color + audio from a $30 dongle 🎉 — *the on-device milestone*
 
 ## Open questions
 - `sps=4` (safe) vs `sps=2` (double bitrate, tighter sync) as the shipping profile?
