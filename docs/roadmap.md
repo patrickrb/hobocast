@@ -69,6 +69,19 @@ Fold the receiver into the Hobocon app alongside the existing sources.
 - [ ] Live color + audio from a $30 dongle 🎉 — *the on-device milestone*
 
 ## Open questions
-- `sps=4` (safe) vs `sps=2` (double bitrate, tighter sync) as the shipping profile?
+- **`sps=4` vs `sps=2` profile** — measured (`demos/profile_sweep.py`): sps=2
+  doubles the payload bitrate (1.2 → 2.4 Mbit/s) for only ~1 dB of noise-margin
+  cost near the cliff (both reach 24/24 by ~7 dB Es/N0), and it is *twice* as
+  tolerant of carrier offset (sps=4 collapses at ~6 kHz CFO, sps=2 holds to
+  ~10 kHz — sps=4's preamble is 2× longer in time, so the coherent correlator
+  integrates 2× the CFO phase and washes out sooner). Leaning **sps=2** for the
+  bitrate + CFO headroom, with sps=4 as the conservative fallback.
+  - Caveat surfaced by the sweep: **both** profiles died by ~15 kHz CFO, yet a
+    30 ppm tuner at 906 MHz is ~27 kHz. **Fixed** with a coarse carrier search
+    (`cfg.cfo_search_hz`, `boxcar.cli --cfo-search`): a Zadoff-Chu correlation
+    couples frequency to timing, so we sweep trial offsets and take the peak
+    that un-shifts. With `--cfo-search 30000` the receiver locks byte-exact from
+    0 to 30 kHz (was dead past ~5 kHz) — see `demos/profile_sweep.py` part (3).
+    Still worth a tuner PPM cal to shrink the search on real hardware.
 - FEC choice: convolutional (simple, proven) vs LDPC (better, more code)?
 - Keep the analog NTSC path as a selectable "authentic B&W" mode, or retire it?

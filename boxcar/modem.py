@@ -31,6 +31,7 @@ class Config:
     soft: bool = False        # soft-decision Viterbi (RX-only; ~2 dB gain)
     interleave: bool = False  # block-interleave coded bits (burst-error defence)
     interleave_depth: int = 32  # interleaver columns (spread) when interleave=True
+    cfo_search_hz: float = 0.0  # coarse carrier search half-range; 0 = off (see _acquire)
 
     @property
     def rsym(self) -> float:
@@ -130,9 +131,31 @@ def _acquire(mf: np.ndarray, cfg: Config, start: int = 0, search: int | None = N
     search = room if search is None else min(search, room)
     if search <= 0:
         return None
-    mag = np.empty(search)
-    for k in range(search):
-        mag[k] = abs(np.dot(ref, mf[start + k + idx]))
+    if cfg.cfo_search_hz > 0:
+        # Coarse carrier acquisition. A Zadoff-Chu correlation couples frequency
+        # to time — an uncorrected offset *shifts* the peak, so the recovered
+        # timing (and thus the phase fit) is wrong well before detection itself
+        # fails. A real tuner's PPM error (~27 kHz at 906 MHz) lands squarely in
+        # that zone. So we sweep trial frequencies: folding each into the
+        # reference un-shifts the peak at the matching offset, and the strongest
+        # peak across the sweep gives the correct timing. Bin spacing keeps the
+        # coherent correlation from washing out between trials.
+        df = 0.5 * cfg.fs / (P * sps)
+        freqs = np.arange(-cfg.cfo_search_hz, cfg.cfo_search_hz + df / 2, df)
+        mag = None
+        best_peak = -1.0
+        for f in freqs:
+            ref_f = ref * np.exp(-1j * 2.0 * np.pi * f * idx / cfg.fs)
+            m = np.empty(search)
+            for k in range(search):
+                m[k] = abs(np.dot(ref_f, mf[start + k + idx]))
+            peak = m.max()
+            if peak > best_peak:
+                best_peak, mag = peak, m
+    else:
+        mag = np.empty(search)
+        for k in range(search):
+            mag[k] = abs(np.dot(ref, mf[start + k + idx]))
     k0 = int(np.argmax(mag))
     ratio = mag[k0] / (np.median(mag) + 1e-12)
     # Parabolic interpolation of the peak for sub-sample timing.

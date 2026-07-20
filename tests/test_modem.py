@@ -125,6 +125,28 @@ def test_stream_iter_looped_decodes():
     assert frames_to_ts(got) == ts * 2
 
 
+def test_coarse_cfo_acquisition():
+    # A carrier offset that wrecks the default acquisition (ZC time/freq
+    # coupling) must decode cleanly once the coarse frequency search is on —
+    # this is what lets a receiver lock on real tuner PPM error.
+    rng = np.random.default_rng(40)
+    ts = rng.integers(0, 256, 188 * 7 * 6, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, 7)
+    big_cfo = 25_000.0  # ~28 ppm at 906 MHz
+
+    off = Config(fec=True, soft=True)
+    rx = apply_channel(modulate_stream(frames, off), off,
+                       es_n0_db=13.0, cfo_hz=big_cfo, frac_delay=0.4, seed=40)
+    assert sum(1 for p in receive_stream(rx, off) if p is not None) < len(frames)  # fails
+
+    on = Config(fec=True, soft=True, cfo_search_hz=30_000.0)
+    rx2 = apply_channel(modulate_stream(frames, on), on,
+                        es_n0_db=13.0, cfo_hz=big_cfo, frac_delay=0.4, seed=40)
+    got = receive_stream(rx2, on)
+    assert all(p is not None for p in got)          # coarse search rescues it
+    assert frames_to_ts(got) == ts                  # byte-exact
+
+
 def test_soft_viterbi_roundtrip():
     # Soft decode of clean symbols must recover the exact info bits.
     from boxcar.fec import conv_encode, viterbi_decode_soft

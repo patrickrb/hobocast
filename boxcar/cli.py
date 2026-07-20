@@ -37,6 +37,7 @@ def _cfg(args) -> Config:
         fec_payload=188 * args.packets,
         soft=getattr(args, "soft", False),
         interleave=getattr(args, "interleave", False),
+        cfo_search_hz=getattr(args, "cfo_search", 0.0),
     )
 
 
@@ -131,6 +132,9 @@ def main(argv=None) -> int:
                         help="soft-decision Viterbi (RX; ~2 dB gain). Waveform-compatible.")
     common.add_argument("--interleave", action="store_true",
                         help="block-interleave coded bits (burst defence). TX+RX must match.")
+    common.add_argument("--cfo-search", type=float, default=0.0, metavar="HZ",
+                        help="RX: coarse carrier search half-range in Hz "
+                             "(e.g. 30000 to lock through real tuner PPM error)")
     common.add_argument("--packets", type=int, default=7,
                         help="TS packets per frame (payload size)")
 
