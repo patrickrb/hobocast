@@ -150,6 +150,50 @@ std::vector<uint8_t> viterbiDecode(const std::vector<uint8_t>& coded) {
     return bits;
 }
 
+// Soft-decision Viterbi: same trellis, but branch metrics come from the
+// received QPSK amplitudes (real=first coded bit, imag=second) instead of
+// hard-sliced bits. ~1.5 dB of coding gain; RX-only so the waveform is
+// unchanged. Mirrors boxcar.fec.viterbi_decode_soft.
+std::vector<uint8_t> viterbiDecodeSoft(const std::vector<cf>& syms) {
+    const int S = Trellis::STATES;
+    long t = (long)syms.size();
+    std::vector<uint8_t> out;
+    if (t == 0) return out;
+
+    // Expected +/-1 amplitudes of the two coded bits for each 2-bit output o.
+    static const double AMP0[4] = {1, 1, -1, -1};  // I: 1-2*(o>>1)
+    static const double AMP1[4] = {1, -1, 1, -1};  // Q: 1-2*(o&1)
+
+    std::vector<double> pm(S, 1e18), pmNext(S);
+    pm[0] = 0.0;
+    std::vector<uint8_t> bp((size_t)t * S), bb((size_t)t * S);
+
+    for (long i = 0; i < t; ++i) {
+        double y0 = syms[i].real(), y1 = syms[i].imag();
+        double cost[4];
+        for (int o = 0; o < 4; ++o) cost[o] = -(y0 * AMP0[o] + y1 * AMP1[o]);
+        for (int d = 0; d < S; ++d) {
+            double c0 = pm[TRELLIS.predS[d][0]] + cost[TRELLIS.predOut[d][0]];
+            double c1 = pm[TRELLIS.predS[d][1]] + cost[TRELLIS.predOut[d][1]];
+            int k = (c1 < c0) ? 1 : 0;
+            pmNext[d] = k ? c1 : c0;
+            bp[(size_t)i * S + d] = (uint8_t)TRELLIS.predS[d][k];
+            bb[(size_t)i * S + d] = (uint8_t)TRELLIS.predU[d][k];
+        }
+        pm.swap(pmNext);
+    }
+
+    std::vector<uint8_t> bits((size_t)t);
+    int s = 0;
+    for (long i = t - 1; i >= 0; --i) {
+        bits[i] = bb[(size_t)i * S + s];
+        s = bp[(size_t)i * S + s];
+    }
+    if (Trellis::TAIL && (long)bits.size() >= Trellis::TAIL)
+        bits.resize(bits.size() - Trellis::TAIL);
+    return bits;
+}
+
 // --- bit/byte plumbing (MSB-first, matching numpy packbits/unpackbits) -----
 std::vector<uint8_t> qpskToBits(const std::vector<cf>& sym) {
     std::vector<uint8_t> bits(sym.size() * 2);
@@ -366,7 +410,9 @@ void BoxcarRx::drainInto(std::vector<uint8_t>& ts, bool flush) {
             long frameEnd = (long)(a.kf + (double)(P + codedSyms) * sps);
             if (frameEnd + 2 > (long)sbuf_.size()) { if (!flush) break; else break; }
             std::vector<cf> out = demodData(sbuf_, a.kf, a.phi0, a.omega, codedSyms);
-            std::vector<uint8_t> data = bitsToBytes(viterbiDecode(qpskToBits(out)));
+            std::vector<uint8_t> info =
+                cfg_.soft ? viterbiDecodeSoft(out) : viterbiDecode(qpskToBits(out));
+            std::vector<uint8_t> data = bitsToBytes(info);
             sCur_ = sBase_ + frameEnd;
             if ((long)data.size() >= 2 + size + 4) {
                 long length = (data[0] << 8) | data[1];

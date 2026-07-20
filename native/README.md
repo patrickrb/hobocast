@@ -27,6 +27,14 @@ C++     boxcar_harness tx.cu8 rx.ts --fec          # receive
 Verified cases: coded (FEC) and uncoded paths, clean and through AWGN + a
 +1500 Hz carrier offset + a 0.4-sample timing offset.
 
+### Soft-decision decoding
+
+`--soft` (or `Config::soft`) uses the received QPSK amplitudes as decoder
+confidences instead of hard-sliced bits — ~1.5 dB of coding gain, RX-only so the
+waveform is unchanged. Measured on a 5.5 dB capture: **hard recovers 54/157
+frames, soft recovers 145/157.** At a clean 12 dB both stay byte-exact, so
+turning it on is free. (Matches `boxcar.fec.viterbi_decode_soft` upstream.)
+
 ### Streaming, too
 
 The phone gets IQ in small chunks, not one big capture, so `BoxcarRx` also

@@ -31,6 +31,7 @@ struct Config {
     int zc_root = 25;         // ZC root
     bool fec = false;         // rate-1/2 convolutional coding
     int fec_payload = 1316;   // fixed payload bytes per coded frame
+    bool soft = false;        // soft-decision Viterbi (RX-only; ~1.5 dB gain)
 };
 
 struct Stats {
