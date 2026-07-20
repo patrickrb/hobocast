@@ -19,6 +19,7 @@ from .stream import (
     receive_stream,
     ts_to_frames,
 )
+from .sdr_io import from_cs8, from_cu8, read_iq, to_cs8, to_cu8, write_iq
 
 __all__ = [
     "Config",
@@ -30,4 +31,10 @@ __all__ = [
     "receive_stream",
     "ts_to_frames",
     "frames_to_ts",
+    "to_cu8",
+    "from_cu8",
+    "to_cs8",
+    "from_cs8",
+    "read_iq",
+    "write_iq",
 ]

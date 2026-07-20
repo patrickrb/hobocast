@@ -96,6 +96,38 @@ def test_fec_stream_beats_uncoded():
     assert len(got_c) > len(got_u)                    # and beats uncoded
 
 
+def test_sdr_format_roundtrip():
+    # The 8-bit CU8/CS8 converters must preserve IQ shape and survive a round-trip.
+    from boxcar.sdr_io import from_cs8, from_cu8, to_cs8, to_cu8
+
+    rng = np.random.default_rng(11)
+    iq = (rng.standard_normal(1000) + 1j * rng.standard_normal(1000)).astype(np.complex128)
+    for to, back in ((to_cu8, from_cu8), (to_cs8, from_cs8)):
+        b = to(iq)
+        assert len(b) == len(iq) * 2                      # interleaved I,Q bytes
+        r = back(b.tobytes())
+        # Amplitude-blind receiver: absolute scale is irrelevant, but the
+        # constellation must survive 8-bit quantization near-perfectly.
+        corr = np.abs(np.vdot(r, iq)) / (np.linalg.norm(r) * np.linalg.norm(iq))
+        assert corr > 0.999
+
+
+def test_decode_through_cu8_quantization():
+    # Full stream decode through the exact 8-bit format the RTL-SDR delivers.
+    from boxcar.sdr_io import from_cu8, to_cu8
+
+    rng = np.random.default_rng(12)
+    ts = rng.integers(0, 256, 188 * 28, dtype=np.uint8).tobytes()
+    frames = ts_to_frames(ts, 7)
+    cfg = Config(fec=True)
+    rx_float = apply_channel(modulate_stream(frames, cfg), cfg,
+                             es_n0_db=12.0, cfo_hz=1500.0, frac_delay=0.4, seed=12)
+    rx_back = from_cu8(to_cu8(rx_float).tobytes())        # through 8-bit ADC
+    got = receive_stream(rx_back, cfg)
+    assert all(p is not None for p in got)
+    assert frames_to_ts(got) == ts                        # byte-exact after quantization
+
+
 def test_stream_multiframe():
     # A chunked "transport stream" of many frames must reassemble byte-exact.
     cfg = Config()

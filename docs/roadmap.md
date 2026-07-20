@@ -27,12 +27,21 @@ Wrap an actual media stream instead of a test image.
       byte-exact, reassembled `.ts` decodes in ffmpeg (`demos/video_loopback.py`)
 - [ ] Pilot symbols for fast re-sync after packet loss (deferred to M4)
 
-## M4 — Real hardware
+## M4 — Real hardware 🟡 (software half done)
 Get bytes over the air, not just through a simulated channel.
-- [ ] RX capture from RTL-SDR (rtl-sdr / SoapySDR) feeding the Python RX
-- [ ] TX via HackRF (`hackrf_transfer`) or a GNU Radio flowgraph
-- [ ] Bench loopback over a cable/attenuator, then over the air
-- [ ] Measure real SNR / packet loss at range
+- [x] Real SDR IQ byte formats: CU8 (RTL-SDR) + CS8 (HackRF) converters
+      (`boxcar/sdr_io.py`) — the exact bytes `rtl_sdr`/`hackrf_transfer` speak
+- [x] `boxcar.cli tx/rx`: file ⇄ IQ capture in those formats, FEC-aware
+- [x] Full chain verified through **8-bit ADC quantization**: 157/157 frames
+      byte-exact (`demos/hardware_loopback.py`), plus regression tests
+- [ ] TX via HackRF (`hackrf_transfer`) or a GNU Radio flowgraph — *needs radio*
+- [ ] RX capture from a real RTL-SDR feeding the Python RX — *needs radio*
+- [ ] Bench loopback over a cable/attenuator, then over the air — *needs radio*
+- [ ] Measure real SNR / packet loss at range — *needs radio*
+
+The software half is done and tested: the receiver already decodes the exact
+byte format a dongle produces. What remains is purely the physical link —
+pipe `boxcar.cli`'s output/input to `hackrf_transfer`/`rtl_sdr`.
 
 ## M5 — On the phone
 Fold the receiver into the Hobocon app alongside the existing sources.

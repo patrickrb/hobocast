@@ -81,6 +81,17 @@ color and sound to everyone's cheap dongle is the point, this is the way.
 - **M2 done** — forward error correction: rate-1/2 convolutional coding + Viterbi
   recovers whole frames several dB deeper into the noise (7/7 at 8 dB where
   uncoded gets 0/7).
+- **M4 software half done** — the receiver speaks the real dongle byte formats
+  (CU8/CS8) and decodes video byte-exact through 8-bit ADC quantization
+  (`demos/hardware_loopback.py`). A `boxcar.cli tx/rx` tool reads and writes the
+  exact `.cu8`/`.cs8` files `rtl_sdr`/`hackrf_transfer` use. What's left is the
+  physical radio link (needs hardware).
 
-Next: **M4** real SDR hardware (RTL-SDR capture in, HackRF transmit out). See the
-[roadmap](docs/roadmap.md).
+```bash
+python demos/hardware_loopback.py                        # decode through the real CU8 format
+python -m boxcar.cli tx video.ts tx.cs8 --fmt cs8 --fec  # file -> HackRF-ready IQ
+python -m boxcar.cli rx capture.cu8 out.ts --fmt cu8 --fec  # RTL-SDR capture -> file
+```
+
+Next: **M4** over-the-air (HackRF transmit → RTL-SDR capture) and **M5** folding
+the receiver into the Hobocon app. See the [roadmap](docs/roadmap.md).
