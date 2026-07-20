@@ -64,6 +64,19 @@ with +1800 Hz carrier offset and a sub-sample timing error, and writes it to
 Full spec: [`docs/protocol.md`](docs/protocol.md). Where this is going:
 [`docs/roadmap.md`](docs/roadmap.md).
 
+## What it looks like on the air
+
+![BOXCAR transmit spectrum — ideal vs. ADALM-Pluto](docs/spectra.png)
+
+Theoretical transmit spectrum — **(a)** an ideal transmitter and **(b)** the same
+waveform through a typical [ADALM-Pluto](https://www.analog.com/plutosdr) (AD9363
+zero-IF) front end. The RRC-shaped QPSK occupies **810 kHz** (`Rsym·(1+β)`), sitting
+with margin inside the 2.4 MHz dongle window. The Pluto panel shows the impairments
+a real direct-conversion radio adds: an LO/DC-leakage spike at center, PA spectral
+regrowth lifting the shoulders to ~−40 dBc, and a ~−60 dBc noise floor. Both curves
+are derived from the modem itself (not measured) — regenerate with
+`python tools/plot_spectra.py` ([PDF](docs/spectra.pdf)).
+
 ## The tradeoff (be honest)
 
 This buys color + audio on the **cheap $30 dongle** — the thing wider-bandwidth
