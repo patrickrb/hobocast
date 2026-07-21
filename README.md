@@ -93,6 +93,7 @@ can open the dongle.
 | `scripts\tx-file.ps1` | Loop a `.cs8` from disk (rock-solid), or render a `.ts`/video first. |
 | `scripts\tx-cycle.ps1` | Rotate a folder of clips, N seconds each, forever. |
 | `scripts\tx-obs.ps1` | Broadcast a live OBS feed (UDP → BOXCAR). |
+| `scripts\fdm_mux.py` | Stack N channel `.cs8` into one wideband composite — **multi-channel** off one HackRF (FDM). |
 | `scripts\render-bars.ps1` | Color bars + 440 Hz tone → `.cs8` IQ file. |
 | `scripts\render-iq.ps1` | Trim + encode a video → `.cs8` IQ file. |
 | `scripts\rx-rtlsdr.ps1` | Capture → decode → play, with `-Loop` / `-Keep`. |
@@ -101,9 +102,11 @@ can open the dongle.
 | `scripts\install-*.{sh,ps1}` | One-time toolchain install per OS. |
 
 Bash flags map to PowerShell switches: `--gain 30 --amp` → `-Gain 30 -Amp`,
-`--loop` → `-Loop`, `--seconds 8` → `-Seconds 8`. Default RF is **906 MHz**, 2.4
-Msps — override with `$env:HOBOCAST_FREQ`, `$env:HOBOCAST_RATE`, etc. (see
-`scripts/_config.ps1`). The `.ps1` scripts keep raw IQ intact the way the `.sh`
+`--loop` → `-Loop`, `--seconds 8` → `-Seconds 8`. The scripts default to **906
+MHz**, 2.4 Msps — override with `$env:HOBOCAST_FREQ`, `$env:HOBOCAST_RATE`, etc.
+(see `scripts/_config.ps1`). The Hobocon deployment instead runs in the **UHF TV
+band** (471.25 MHz up, matched to the antenna) and stacks **multiple channels**
+into one HackRF transmission — see [multi-channel](#multi-channel-one-hackrf-many-channels). The `.ps1` scripts keep raw IQ intact the way the `.sh`
 ones do: byte-critical stages write straight to a file, and the two live transmit
 pipelines run through `cmd.exe` (byte-exact pipes) because Windows PowerShell's
 `|` would corrupt the bytes. Full walkthrough + tuning knobs: [`docs/demo.md`](docs/demo.md).
@@ -127,6 +130,31 @@ pipelines run through `cmd.exe` (byte-exact pipes) because Windows PowerShell's
 
 Full spec: [`docs/protocol.md`](docs/protocol.md). Where this is going:
 [`docs/roadmap.md`](docs/roadmap.md).
+
+## Multi-channel: one HackRF, many channels
+
+Each BOXCAR channel is only **810 kHz** wide but the HackRF can put out ~20 MHz —
+so one radio can broadcast **several channels at once** by frequency-division
+multiplexing them into a single wideband stream. Every viewer just tunes their
+RTL-SDR to the channel they want; **one transmitter, one antenna**.
+
+`scripts/fdm_mux.py` stacks N per-channel `.cs8` files (2.4 MS/s baseband each):
+upsample each to a common composite rate, shift each into its frequency slot, and
+sum. The expensive part — modulation — is already done per channel, so this is
+just resample + shift + sum.
+
+```bash
+# 6 channels 1.5 MHz apart, centered at 475 MHz, one HackRF
+python scripts/fdm_mux.py --out composite.cs8 \
+    reel-1.cs8@-3750000 reel-2.cs8@-2250000 reel-3.cs8@-750000 \
+    reel-4.cs8@750000   reel-5.cs8@2250000  reel-6.cs8@3750000
+hackrf_transfer -t composite.cs8 -f 475000000 -s 12000000 -R
+```
+
+Space channels ≥ their occupied BW + guard (1.5 MHz works for 810 kHz), keep the
+composite DC between channels (LO spur), and mind the 8-bit DAC: each channel
+loses ≈ `10·log₁₀(N)` dB to the power split, so bump gain / enable the amp for
+more channels. Details in [`docs/protocol.md`](docs/protocol.md) §6.
 
 ## What it looks like on the air
 
