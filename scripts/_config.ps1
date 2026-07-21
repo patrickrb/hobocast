@@ -153,8 +153,14 @@ function Invoke-BytePipeline {
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("hobocast-" + [System.IO.Path]::GetRandomFileName() + ".cmd")
     $body = "@echo off`r`ncd /d `"$RepoRoot`"`r`n$PipelineText`r`n"
     Set-Content -LiteralPath $tmp -Value $body -Encoding Ascii
+    # hackrf_transfer / ffmpeg write normal progress to stderr; with 'Stop' (or a
+    # 2>&1 capture) PowerShell would turn the first such line into a fatal error
+    # and kill a working transmit. Force Continue for the child so only a real
+    # non-zero exit code matters.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try { & cmd.exe /c $tmp; return $LASTEXITCODE }
-    finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
+    finally { $ErrorActionPreference = $prev; Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
 }
 
 # A cmd-quoted token for the python launcher, for use inside Invoke-BytePipeline.

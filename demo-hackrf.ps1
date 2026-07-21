@@ -26,7 +26,10 @@ Write-Host "----------------------------------------------------------------"
 $txhackrf = Join-Path $PSScriptRoot 'scripts\tx-hackrf.ps1'
 if ($clips.Count -gt 0) {
     Write-Host "[channel] $($clips.Count) clip(s) in media\channel - streaming on loop"
-    & $txhackrf @($clips.FullName) -Gain $Gain
+    # Splat a variable (@paths) so each path is a separate positional arg;
+    # @($clips.FullName) would pass the whole array as one bogus argument.
+    $paths = @($clips.FullName)
+    & $txhackrf @paths -Gain $Gain
 } else {
     Write-Host "[channel] no clips in media\channel - transmitting color bars"
     Write-Host "[tip]     drop any .mp4 into media\channel\ (or run scripts\fetch-commercials.ps1)"
